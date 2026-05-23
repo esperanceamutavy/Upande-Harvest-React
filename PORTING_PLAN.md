@@ -30,13 +30,13 @@
 
 ## Phase 1 — Auth
 
-⬜ **1.1** `src/app/(auth)/login.tsx` — login form: URL, email, password. Pre-fill URL and email from AsyncStorage (`instanceurl_backup`, `email_backup`)
-⬜ **1.2** URL normalization: try `https://` first with a HEAD check (5s timeout), fall back to `http://`. Match Flutter `auth_repository.dart:12-43` behavior.
-⬜ **1.3** Login flow: POST `/api/method/login` → cookie in transient memory → POST `frappe.core.doctype.user.user.generate_keys` → store api_key + api_secret in SecureStore → discard cookie
-⬜ **1.4** Show client name on login screen once URL is entered (via `instanceMapper`)
-⬜ **1.5** Auth gate reads SecureStore on app launch, hydrates Zustand auth store
-⬜ **1.6** Logout: clear SecureStore (except `email_backup`, `instanceurl_backup` in AsyncStorage)
-⬜ **1.7** Logo on login screen — copy `upande_logo.png` from Flutter assets
+✅ **1.1** `src/app/(auth)/login.tsx` — login form: URL, email, password. Pre-fill URL and email from AsyncStorage (`instanceurl_backup`, `email_backup`)
+✅ **1.2** URL normalization: try `https://` first with a HEAD check (5s timeout), fall back to `http://`. Match Flutter `auth_repository.dart:12-43` behavior.
+✅ **1.3** Login flow: POST `/api/method/login` → cookie in transient memory → POST `frappe.core.doctype.user.user.generate_keys` → store api_key + api_secret in SecureStore → discard cookie
+✅ **1.4** Show client name on login screen once URL is entered (via `instanceMapper`)
+✅ **1.5** Auth gate reads SecureStore on app launch, hydrates Zustand auth store
+✅ **1.6** Logout: clear SecureStore (except `email_backup`, `instanceurl_backup` in AsyncStorage)
+✅ **1.7** Logo on login screen — copy `upande_logo.png` from Flutter assets
 
 **Phase 1 acceptance:** Can log in to a Kikwetu Frappe instance, app remembers credentials across restart, logout works, wrong password shows error. No cookie is ever persisted.
 
