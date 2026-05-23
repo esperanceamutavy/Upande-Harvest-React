@@ -18,7 +18,7 @@
 ✅ **0.8** `src/lib/haptics.ts` — expo-haptics wrappers (heavy = warning, light = scan)
 ✅ **0.9** `src/lib/clients.ts`, `src/lib/instanceMapper.ts`, `src/features/station/useClient.ts` hook
 ✅ **0.10** Zustand stores: `src/stores/auth.ts`, `src/stores/client.ts`, `src/stores/station.ts`
-⬜ **0.11** Auth gate in `src/app/_layout.tsx` (redirect to login if no API key in SecureStore)
+✅ **0.11** Auth gate in `src/app/_layout.tsx` (redirect to login if no API key in SecureStore)
 ⬜ **0.12** Sentry init — new RN project, DSN in `.env`, `.env.example` committed
 ⬜ **0.13** Update `README.md` (how to run, env setup, link to STACK.md and PORTING_PLAN.md)
 

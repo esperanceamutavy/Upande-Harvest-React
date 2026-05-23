@@ -1,14 +1,7 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Redirect } from 'expo-router';
 
+// Auth gate in _layout.tsx handles the redirect.
+// This fallback ensures Expo Router always has a matching root route.
 export default function Index() {
-  return (
-    <View style={styles.container}>
-      <Text style={styles.text}>Kikwetu Harvest — initializing</Text>
-    </View>
-  );
+  return <Redirect href="/(auth)/login" />;
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  text: { fontSize: 16 },
-});
