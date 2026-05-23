@@ -1,56 +1,49 @@
-# Welcome to your Expo app 👋
+# kikwetu-harvest-rn
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+React Native + Expo port of the Kikwetu Harvest Flutter app.
+Farm operations data-capture for cut-flower farms — harvesting, receiving, grading, packing, dispatch.
 
-## Get started
+See [STACK.md](STACK.md) for locked technology decisions and [PORTING_PLAN.md](PORTING_PLAN.md) for phase-by-phase status.
+[RECON.md](RECON.md) is the source-of-truth reference for Flutter app behaviour, endpoints, and data shapes.
 
-1. Install dependencies
+## Prerequisites
 
-   ```bash
-   npm install
-   ```
+- Node 20+
+- [Expo Go](https://expo.dev/go) on your iOS or Android device (v1 uses managed workflow)
+- A running Frappe/ERPNext instance (Kikwetu staging or production)
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Setup
 
 ```bash
-npm run reset-project
+npm install
+
+cp .env.example .env
+# Edit .env and fill in EXPO_PUBLIC_SENTRY_DSN (optional; app works without it)
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Run
 
-### Other setup steps
+```bash
+npx expo start
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Scan the QR code with Expo Go. The app will show the login screen (Phase 1 not yet implemented — it shows a placeholder).
 
-## Learn more
+Clear Metro cache if you see stale module errors:
 
-To learn more about developing your project with Expo, look at the following resources:
+```bash
+npx expo start -c
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Environment
 
-## Join the community
+| Variable | Required | Description |
+|---|---|---|
+| `EXPO_PUBLIC_SENTRY_DSN` | No | Sentry DSN for the React Native project. App is a no-op without it. |
 
-Join our community of developers creating universal apps.
+## Project docs
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- [STACK.md](STACK.md) — locked decisions: Expo SDK, navigation, state, HTTP, UI
+- [PORTING_PLAN.md](PORTING_PLAN.md) — phase checklist with acceptance criteria
+- [RECON.md](RECON.md) — full Flutter app reconnaissance (endpoints, data shapes, screens)
+- [AGENTS.md](AGENTS.md) — working agreement for AI agents in this repo
