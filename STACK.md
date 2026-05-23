@@ -56,8 +56,11 @@
 - **`expo-camera`** — `CameraView` with built-in `barcodeScannerSettings` for QR scanning
 - **`expo-audio`** — audio playback for `beep.mp3`, `submit.mp3`, `error.mp3` (replaces `expo-av`, which was split into `expo-audio` + `expo-video` in SDK 54+; `expo-av` is incompatible with SDK 56)
 - **`expo-haptics`** — replaces Flutter's `vibration` package (`impactAsync(Heavy)` ≈ 200ms pulse)
-- **`react-native-webview`** — ERP Desk view (token auth: inject `Authorization` header into webview requests)
 - **`react-native-svg`** — required by `lucide-react-native` (icons) and will be used for QR rendering in Phase 6
+- **`@react-native-community/datetimepicker`** — native date picker for dashboard date-range filter (Phase 2.4)
+
+## Installed but deferred to Phase 6
+- **`react-native-webview`** — ERP Desk screen (Phase 6.3). Token auth does not produce a browser session; proper integration requires `@react-native-cookies/cookies` to inject a Frappe session cookie. Do not use in v1 screens before Phase 6.3.
 
 ## Deferred to v1.1 (requires dev build)
 - Bluetooth thermal printing (`react-native-thermal-receipt-printer` or similar — printer model TBD)

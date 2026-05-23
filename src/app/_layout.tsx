@@ -1,8 +1,9 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 import { TamaguiProvider } from 'tamagui';
 
 import { tamaguiConfig } from '../../tamagui.config';
@@ -18,6 +19,15 @@ function RootLayoutNav() {
   const setCredentials = useAuthStore((s) => s.setCredentials);
   const segments = useSegments();
   const router = useRouter();
+
+  // Make TanStack Query refetchOnWindowFocus work in React Native.
+  // AppState 'active' = app foregrounded = treat as window focus.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      focusManager.setFocused(state === 'active');
+    });
+    return () => sub.remove();
+  }, []);
 
   // Read SecureStore on first mount and hydrate the auth store.
   // Splash screen stays visible until this completes (Phase 1.5 polishes timing).

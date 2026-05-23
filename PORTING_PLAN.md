@@ -54,12 +54,12 @@
 ⬜ **F2** Unreachable URL (e.g. type `nope.upande.com`) — verify "Cannot reach nope.upande.com — check your network connection." appears
 
 ⬜ **2.1** `src/app/(app)/_layout.tsx` — drawer or tab layout
-⬜ **2.2** Dashboard route — fetch `GET /api/resource/Stock Entry?fields=["*"]&limit=1000&order_by=creation desc` via TanStack Query
+⬜ **2.2** Dashboard route — fetch `GET /api/resource/Stock Entry?fields=["name","posting_date","docstatus","stock_entry_type","total_amount"]&limit=1000&order_by=creation+desc` via TanStack Query (narrow fields; `total_amount` confirmed from Flutter `stock_entry.dart:53`)
 ⬜ **2.3** Filter by stock entry type — dropdown driven by `GET /api/resource/Stock Entry Type?fields=["name"]&limit=1000`
 ⬜ **2.4** Filter by date range
 ⬜ **2.5** Pull-to-refresh + empty state + error state
 ⬜ **2.6** Drawer menu — list of Kikwetu workflows (placeholder routes filled in Phase 4)
-⬜ **2.7** ERP Desk webview screen — `react-native-webview` loading `{instanceurl}/app/home` with `Authorization` header injection
+⬜ **2.7** ERP Desk drawer item — placeholder screen, real implementation deferred to Phase 6.3
 
 **Phase 2 acceptance:** Real Kikwetu stock entries visible, list refreshes, drawer navigates to placeholder screens.
 
