@@ -2,6 +2,8 @@
 
 > Read this before writing any code. Do not introduce new libraries or change patterns without updating this file first.
 
+> **When in doubt about a package, check https://docs.expo.dev/versions/v56.0.0/ — STACK.md was drafted before all SDK 56 deprecations were known.**
+
 ## Platform
 - **Runtime:** React Native via Expo (managed workflow)
 - **Expo SDK:** 56 (locked at project creation, May 2026)
@@ -52,7 +54,7 @@
 
 ## Native modules in v1
 - **`expo-camera`** — `CameraView` with built-in `barcodeScannerSettings` for QR scanning
-- **`expo-av`** — audio playback for `beep.mp3`, `submit.mp3`, `error.mp3`
+- **`expo-audio`** — audio playback for `beep.mp3`, `submit.mp3`, `error.mp3` (replaces `expo-av`, which was split into `expo-audio` + `expo-video` in SDK 54+; `expo-av` is incompatible with SDK 56)
 - **`expo-haptics`** — replaces Flutter's `vibration` package (`impactAsync(Heavy)` ≈ 200ms pulse)
 - **`react-native-webview`** — ERP Desk view (token auth: inject `Authorization` header into webview requests)
 
@@ -118,7 +120,7 @@ src/
 │   ├── storage.ts             # async-storage + secure-store wrappers
 │   ├── clients.ts             # client config registry
 │   ├── instanceMapper.ts
-│   ├── audio.ts               # expo-av wrappers for beep/submit/error
+│   ├── audio.ts               # expo-audio wrappers for beep/submit/error
 │   └── haptics.ts             # expo-haptics wrappers
 ├── stores/                    # Zustand stores
 │   ├── auth.ts

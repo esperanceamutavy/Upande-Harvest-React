@@ -1,27 +1,23 @@
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
 
-let beep: Audio.Sound | null = null;
-let submit: Audio.Sound | null = null;
-let error: Audio.Sound | null = null;
+let beep: AudioPlayer | null = null;
+let submit: AudioPlayer | null = null;
+let error: AudioPlayer | null = null;
 
 export async function initAudio(): Promise<void> {
-  await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+  await setAudioModeAsync({ playsInSilentMode: true });
 
-  beep = new Audio.Sound();
-  submit = new Audio.Sound();
-  error = new Audio.Sound();
-
-  await beep.loadAsync(require('@/assets/sounds/beep.mp3'));
-  await submit.loadAsync(require('@/assets/sounds/submit.mp3'));
-  await error.loadAsync(require('@/assets/sounds/error.mp3'));
+  beep = createAudioPlayer(require('@/assets/sounds/beep.mp3'));
+  submit = createAudioPlayer(require('@/assets/sounds/submit.mp3'));
+  error = createAudioPlayer(require('@/assets/sounds/error.mp3'));
 }
 
-async function replaySound(sound: Audio.Sound | null): Promise<void> {
-  if (!sound) return;
-  await sound.setPositionAsync(0);
-  await sound.playAsync();
+function replaySound(player: AudioPlayer | null): void {
+  if (!player) return;
+  player.seekTo(0);
+  player.play();
 }
 
-export const playBeep = (): Promise<void> => replaySound(beep);
-export const playSubmit = (): Promise<void> => replaySound(submit);
-export const playError = (): Promise<void> => replaySound(error);
+export const playBeep = (): void => replaySound(beep);
+export const playSubmit = (): void => replaySound(submit);
+export const playError = (): void => replaySound(error);
