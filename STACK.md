@@ -57,6 +57,7 @@
 - **`expo-audio`** — audio playback for `beep.mp3`, `submit.mp3`, `error.mp3` (replaces `expo-av`, which was split into `expo-audio` + `expo-video` in SDK 54+; `expo-av` is incompatible with SDK 56)
 - **`expo-haptics`** — replaces Flutter's `vibration` package (`impactAsync(Heavy)` ≈ 200ms pulse)
 - **`react-native-webview`** — ERP Desk view (token auth: inject `Authorization` header into webview requests)
+- **`react-native-svg`** — required by `lucide-react-native` (icons) and will be used for QR rendering in Phase 6
 
 ## Deferred to v1.1 (requires dev build)
 - Bluetooth thermal printing (`react-native-thermal-receipt-printer` or similar — printer model TBD)
