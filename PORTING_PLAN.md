@@ -40,6 +40,8 @@
 
 **Phase 1 acceptance:** Can log in to a Kikwetu Frappe instance, app remembers credentials across restart, wrong password shows error. (Logout flow is coded but end-to-end UI test is deferred to Phase 2 when the drawer/logout button exists.) No cookie is ever persisted.
 
+**Verified on device (Android, EAS dev client APK, real Kikwetu Frappe instance) — login + persistence-across-restart work. Wrong-password and unreachable-URL paths confirmed in code review but UI test deferred until logout button exists in Phase 2.**
+
 **Implementation note:** Frappe's `generate_keys` rotates the secret if a key already exists. Document this in `src/features/auth/README.md`. Acceptable trade-off because this app is the only consumer of the per-worker API key.
 
 ---
