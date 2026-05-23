@@ -20,7 +20,7 @@ export function useLogin() {
     setError(null);
     try {
       const { instanceUrl, apiKey, apiSecret, fullName } = await loginAndGetKeys(
-        url.trim().toLowerCase(),
+        url.trim(),
         email.trim(),
         password,
       );

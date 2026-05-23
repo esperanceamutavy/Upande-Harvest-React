@@ -67,15 +67,16 @@ export async function loginAndGetKeys(
     rawCookie = `sid=${sid}`;
     console.log('[auth] Login successful, got cookie');
   } catch (err: unknown) {
-    if (axios.isAxiosError(err) && err.response) {
-      const data = err.response.data as { message?: string; exception?: string } | undefined;
-      const msg = data?.message ?? data?.exception ?? 'Login failed';
-      throw new Error(msg);
+    if (axios.isAxiosError(err)) {
+      if (err.response) {
+        const data = err.response.data as { message?: string; exception?: string } | undefined;
+        throw new Error(data?.message ?? data?.exception ?? 'Login failed');
+      }
+      const host = bareUrl.split('/')[0];
+      throw new Error(`Cannot reach ${host} — check your network connection.`);
     }
-    // Re-throw our own Error objects (sid === 'Guest' case above)
     if (err instanceof Error) throw err;
-    const host = bareUrl.split('/')[0];
-    throw new Error(`Cannot reach ${host} — check your network connection.`);
+    throw new Error('Login failed.');
   }
 
   // ── Step 2: generate_keys ────────────────────────────────────────────────
@@ -112,9 +113,12 @@ export async function loginAndGetKeys(
     console.log('[auth] Generated API key');
     return { instanceUrl, apiKey, apiSecret, fullName };
   } catch (err: unknown) {
-    if (axios.isAxiosError(err) && err.response) {
-      const data = err.response.data as { message?: string } | undefined;
-      throw new Error(data?.message ?? 'Failed to generate API key. Please try again.');
+    if (axios.isAxiosError(err)) {
+      if (err.response) {
+        const data = err.response.data as { message?: string } | undefined;
+        throw new Error(data?.message ?? 'Failed to generate API key. Please try again.');
+      }
+      throw new Error('Failed to generate API key. Please try again.');
     }
     if (err instanceof Error) throw err;
     throw new Error('Failed to generate API key. Please try again.');

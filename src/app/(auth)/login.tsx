@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { Image, KeyboardAvoidingView, Platform, StyleSheet, TouchableOpacity } from 'react-native';
 import { Button, Input, Text, XStack, YStack } from 'tamagui';
+import { Eye, EyeOff } from 'lucide-react-native';
 
 import { CLIENT_REGISTRY } from '../../lib/clients';
 import { getClientIdByUrl } from '../../lib/instanceMapper';
@@ -39,14 +40,15 @@ export default function LoginScreen() {
         getStorageItem(STORAGE_KEYS.EMAIL_BACKUP),
       ]);
       if (savedUrl) {
-        setValue('url', savedUrl.replace(/^https?:\/\//, ''));
+        setValue('url', savedUrl.replace(/^https?:\/\//, '').replace(/\/+$/, ''));
       }
       if (savedEmail) {
         setValue('email', savedEmail);
       }
     }
     void prefill();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setValue]);
 
   // Client name badge — updates on every keystroke, pure synchronous lookup
   useEffect(() => {
@@ -162,7 +164,7 @@ export default function LoginScreen() {
                 hitSlop={8}
                 style={styles.eyeButton}
               >
-                <Text fontSize={18}>{passwordVisible ? '🙈' : '👁️'}</Text>
+                {passwordVisible ? <EyeOff size={20} color="#666" /> : <Eye size={20} color="#666" />}
               </TouchableOpacity>
             </XStack>
             {errors.password && (

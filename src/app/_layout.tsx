@@ -1,14 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
-import { initSentry } from '../lib/sentry';
-
-initSentry();
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { TamaguiProvider } from 'tamagui';
 
 import { tamaguiConfig } from '../../tamagui.config';
+import '../lib/sentry'; // side-effect: initialises Sentry once at module load
 import { getSecureItem, getStorageItem, SECURE_KEYS, STORAGE_KEYS } from '../lib/storage';
 import { useAuthStore } from '../stores/auth';
 
@@ -16,7 +14,8 @@ const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   const [hydrated, setHydrated] = useState(false);
-  const { isAuthenticated, setCredentials } = useAuthStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const setCredentials = useAuthStore((s) => s.setCredentials);
   const segments = useSegments();
   const router = useRouter();
 
