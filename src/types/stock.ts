@@ -1,13 +1,13 @@
-/** Minimal Stock Entry fields returned by the dashboard list query */
+/** Stock Entry fields returned by the dashboard list query.
+ *  Frappe field name: total_amount (confirmed from Flutter stock_entry.dart:53).
+ *  Add fields here only as screens need them — do not fetch * from the API. */
 export interface StockEntry {
   name: string;
   stock_entry_type: string;
   posting_date: string;
-  posting_time: string;
   docstatus: number;
-  company: string;
-  creation: string;
-  modified: string;
+  total_amount: number | null;
+  // Phase 4 workflow fields (present when fetched individually or via *)
   custom_farm?: string;
   custom_greenhouse?: string;
   custom_bunch_id?: string;
