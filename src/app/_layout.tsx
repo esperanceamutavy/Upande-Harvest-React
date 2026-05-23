@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 import { TamaguiProvider } from 'tamagui';
 
 import { tamaguiConfig } from '../../tamagui.config';
-import { getSecureItem, SECURE_KEYS } from '../lib/storage';
+import { getSecureItem, getStorageItem, SECURE_KEYS, STORAGE_KEYS } from '../lib/storage';
 import { useAuthStore } from '../stores/auth';
 
 const queryClient = new QueryClient();
@@ -24,13 +24,21 @@ function RootLayoutNav() {
   // Splash screen stays visible until this completes (Phase 1.5 polishes timing).
   useEffect(() => {
     async function hydrate() {
-      const [apiKey, apiSecret, instanceUrl] = await Promise.all([
+      const [apiKey, apiSecret, instanceUrl, fullName, email] = await Promise.all([
         getSecureItem(SECURE_KEYS.API_KEY),
         getSecureItem(SECURE_KEYS.API_SECRET),
         getSecureItem(SECURE_KEYS.INSTANCE_URL),
+        getStorageItem('fullname'),
+        getStorageItem(STORAGE_KEYS.EMAIL_BACKUP),
       ]);
       if (apiKey && apiSecret && instanceUrl) {
-        setCredentials({ apiKey, apiSecret, instanceUrl, fullName: '', email: '' });
+        setCredentials({
+          apiKey,
+          apiSecret,
+          instanceUrl,
+          fullName: fullName ?? '',
+          email: email ?? '',
+        });
       }
       setHydrated(true);
       await SplashScreen.hideAsync();
