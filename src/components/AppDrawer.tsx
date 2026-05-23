@@ -82,15 +82,14 @@ export function AppDrawer({ isOpen, onClose }: Props) {
 
   function navigate(route: string) {
     onClose();
+    // TODO: type MenuItem.route as Href once Expo Router types stabilize
     router.push(route as never);
   }
 
   const initial = fullName && fullName.length > 0 ? fullName[0].toUpperCase() : 'U';
 
-  if (!isOpen) return null;
-
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+    <View style={StyleSheet.absoluteFill} pointerEvents={isOpen ? 'box-none' : 'none'}>
       {/* Dim overlay */}
       <Animated.View
         style={[StyleSheet.absoluteFill, styles.overlay, { opacity: overlayOpacity }]}

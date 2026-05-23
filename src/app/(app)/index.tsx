@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Adapt, Select, Sheet, Text, XStack, YStack } from 'tamagui';
+import { Adapt, Button, Select, Sheet, Text, XStack, YStack } from 'tamagui';
 import { useRouter } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar, ChevronDown, Menu, X } from 'lucide-react-native';
@@ -22,7 +22,10 @@ function getGreeting(): string {
 }
 
 function fmtDate(d: Date): string {
-  return d.toISOString().split('T')[0];
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 export default function Dashboard() {
@@ -35,7 +38,7 @@ export default function Dashboard() {
   const [toDate, setToDate] = useState<Date | null>(null);
   const [showPicker, setShowPicker] = useState<'from' | 'to' | null>(null);
 
-  const { data: entries = [], isFetching, refetch } = useStockEntries();
+  const { data: entries = [], isFetching, isLoading, error, refetch } = useStockEntries();
   const { data: entryTypes = [] } = useStockEntryTypes();
 
   const typeOptions = useMemo(() => ['All', ...entryTypes], [entryTypes]);
@@ -44,9 +47,10 @@ export default function Dashboard() {
     return entries.filter((e) => {
       const typeOk = selectedType === 'All' || e.stock_entry_type === selectedType;
       if (!typeOk) return false;
-      if (fromDate && toDate) {
-        const d = new Date(e.posting_date);
-        return d >= fromDate && d <= toDate;
+      if (fromDate || toDate) {
+        const d = new Date(e.posting_date + 'T00:00:00');
+        if (fromDate && d < fromDate) return false;
+        if (toDate && d > toDate) return false;
       }
       return true;
     });
@@ -79,7 +83,9 @@ export default function Dashboard() {
           </Text>
         </YStack>
         <Text fontSize={17} fontWeight="bold">
-          {item.total_amount != null ? `${item.total_amount} /-` : '—'}
+          {item.total_amount != null
+            ? `${item.total_amount.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} /-`
+            : '—'}
         </Text>
       </Pressable>
     ),
@@ -164,29 +170,43 @@ export default function Dashboard() {
         Stock entries
       </Text>
 
-      <FlatList
-        data={filteredEntries}
-        keyExtractor={(item) => item.name}
-        renderItem={renderItem}
-        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} />}
-        contentContainerStyle={filteredEntries.length === 0 ? styles.emptyContainer : undefined}
-        ListEmptyComponent={
-          <YStack alignItems="center" gap="$2" padding="$4">
-            <Text color="$accent" fontSize={14}>No entries available</Text>
-          </YStack>
-        }
-        ItemSeparatorComponent={() => <YStack style={styles.separator} />}
-        style={styles.list}
-      />
+      {error ? (
+        <YStack flex={1} alignItems="center" justifyContent="center" gap="$3" padding="$4">
+          <Text color="$red10" fontSize={14} textAlign="center">
+            {(error as { message?: string }).message ?? 'Failed to load entries'}
+          </Text>
+          <Button onPress={() => void refetch()} size="$3" backgroundColor="$accent" color="white">
+            Retry
+          </Button>
+        </YStack>
+      ) : (
+        <FlatList
+          data={filteredEntries}
+          keyExtractor={(item) => item.name}
+          renderItem={renderItem}
+          refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} />}
+          contentContainerStyle={filteredEntries.length === 0 ? styles.emptyContainer : undefined}
+          ListEmptyComponent={
+            <YStack alignItems="center" gap="$2" padding="$4">
+              <Text color="$accent" fontSize={14}>
+                {isLoading ? 'Loading…' : 'No entries available'}
+              </Text>
+            </YStack>
+          }
+          ItemSeparatorComponent={() => <YStack style={styles.separator} />}
+          style={styles.list}
+        />
+      )}
 
       {showPicker != null && (
         <DateTimePicker
           value={(showPicker === 'from' ? fromDate : toDate) ?? new Date()}
           mode="date"
-          onChange={(_, date) => {
-            if (showPicker === 'from') setFromDate(date ?? null);
-            else setToDate(date ?? null);
+          onChange={(event, date) => {
             setShowPicker(null);
+            if (event.type === 'dismissed' || !date) return;
+            if (showPicker === 'from') setFromDate(date);
+            else setToDate(date);
           }}
         />
       )}
