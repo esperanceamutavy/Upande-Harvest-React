@@ -1,8 +1,7 @@
 import axios, { AxiosError } from 'axios';
 
 import type { ApiError, FrappeErrorBody } from '../types/frappe';
-
-// TODO Phase 1.3: import useAuthStore and inject instanceUrl + token per-request
+import { useAuthStore } from '../stores/auth';
 
 function parseFrappeError(error: AxiosError<FrappeErrorBody>): ApiError {
   const status = error.response?.status ?? 0;
@@ -38,14 +37,15 @@ function parseFrappeError(error: AxiosError<FrappeErrorBody>): ApiError {
  */
 export const apiClient = axios.create();
 
-// Request interceptor — auth injected here in Phase 1.3
+// Request interceptor — reads live store state so every request picks up current credentials.
 apiClient.interceptors.request.use((config) => {
-  // TODO Phase 1.3: read from useAuthStore.getState()
-  // const { instanceUrl, apiKey, apiSecret } = useAuthStore.getState()
-  // config.baseURL = instanceUrl
-  // if (apiKey && apiSecret) {
-  //   config.headers.Authorization = `token ${apiKey}:${apiSecret}`
-  // }
+  const { instanceUrl, apiKey, apiSecret } = useAuthStore.getState();
+  if (instanceUrl) {
+    config.baseURL = instanceUrl;
+  }
+  if (apiKey && apiSecret) {
+    config.headers.Authorization = `token ${apiKey}:${apiSecret}`;
+  }
   return config;
 });
 
