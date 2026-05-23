@@ -16,8 +16,8 @@
 ✅ **0.6** `src/lib/api.ts` — axios instance with auth header interceptor and error normalization (Frappe error shape → typed `ApiError`)
 ✅ **0.7** `src/lib/audio.ts` — expo-av singleton player, plus copy `beep.mp3`, `submit.mp3`, `error.mp3` from `~/projects/kikwetu-harvest-flutter/assets/`
 ✅ **0.8** `src/lib/haptics.ts` — expo-haptics wrappers (heavy = warning, light = scan)
-⬜ **0.9** `src/lib/clients.ts`, `src/lib/instanceMapper.ts`, `src/features/station/useClient.ts` hook
-⬜ **0.10** Zustand stores: `src/stores/auth.ts`, `src/stores/client.ts`, `src/stores/station.ts`
+✅ **0.9** `src/lib/clients.ts`, `src/lib/instanceMapper.ts`, `src/features/station/useClient.ts` hook
+✅ **0.10** Zustand stores: `src/stores/auth.ts`, `src/stores/client.ts`, `src/stores/station.ts`
 ⬜ **0.11** Auth gate in `src/app/_layout.tsx` (redirect to login if no API key in SecureStore)
 ⬜ **0.12** Sentry init — new RN project, DSN in `.env`, `.env.example` committed
 ⬜ **0.13** Update `README.md` (how to run, env setup, link to STACK.md and PORTING_PLAN.md)
