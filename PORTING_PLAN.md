@@ -12,10 +12,10 @@
 ✅ **0.2** Planning docs in place (`AGENTS.md`, `STACK.md`, `PORTING_PLAN.md`, `RECON.md`)
 ✅ **0.3** Install stack deps: zustand, @tanstack/react-query, axios, react-hook-form, zod, @hookform/resolvers, @react-native-async-storage/async-storage, expo-secure-store, expo-camera, expo-av, expo-haptics, react-native-webview, @sentry/react-native (note: @expo-google-fonts/inter replaced by @tamagui/font-inter in 0.4)
 ✅ **0.4** Install Tamagui (`@tamagui/config`, `tamagui`, plus the expo-router config) and configure theme tokens with Kikwetu colors (#44433e, #699dcd, #48773E, #F4F4F6)
-⬜ **0.5** `src/lib/storage.ts` — wrappers for AsyncStorage + SecureStore
-⬜ **0.6** `src/lib/api.ts` — axios instance with auth header interceptor and error normalization (Frappe error shape → typed `ApiError`)
-⬜ **0.7** `src/lib/audio.ts` — expo-av singleton player, plus copy `beep.mp3`, `submit.mp3`, `error.mp3` from `~/projects/kikwetu-harvest-flutter/assets/`
-⬜ **0.8** `src/lib/haptics.ts` — expo-haptics wrappers (heavy = warning, light = scan)
+✅ **0.5** `src/lib/storage.ts` — wrappers for AsyncStorage + SecureStore
+✅ **0.6** `src/lib/api.ts` — axios instance with auth header interceptor and error normalization (Frappe error shape → typed `ApiError`)
+✅ **0.7** `src/lib/audio.ts` — expo-av singleton player, plus copy `beep.mp3`, `submit.mp3`, `error.mp3` from `~/projects/kikwetu-harvest-flutter/assets/`
+✅ **0.8** `src/lib/haptics.ts` — expo-haptics wrappers (heavy = warning, light = scan)
 ⬜ **0.9** `src/lib/clients.ts`, `src/lib/instanceMapper.ts`, `src/features/station/useClient.ts` hook
 ⬜ **0.10** Zustand stores: `src/stores/auth.ts`, `src/stores/client.ts`, `src/stores/station.ts`
 ⬜ **0.11** Auth gate in `src/app/_layout.tsx` (redirect to login if no API key in SecureStore)
