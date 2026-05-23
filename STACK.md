@@ -39,7 +39,7 @@
   - `accent` = `#699dcd` (steel blue)
   - `success` = `#48773E` (dark green)
   - `background` = `#F4F4F6`
-- Font: Inter (via `@expo-google-fonts/inter`)
+- Font: Inter (via `@tamagui/font-inter` — ships the same font files and integrates with `createInterFont()`; `@expo-google-fonts/inter` is redundant alongside Tamagui)
 
 ## Forms & validation
 - **`react-hook-form`** for form state
