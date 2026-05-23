@@ -8,8 +8,8 @@
 
 ## Phase 0 — Foundation
 
-⬜ **0.1** Demo content removed (`src/components`, `src/hooks`, `src/constants`, `src/global.css`, `src/app/explore.tsx`)
-⬜ **0.2** Planning docs in place (`AGENTS.md`, `STACK.md`, `PORTING_PLAN.md`, `RECON.md`)
+✅ **0.1** Demo content removed (`src/components`, `src/hooks`, `src/constants`, `src/global.css`, `src/app/explore.tsx`)
+✅ **0.2** Planning docs in place (`AGENTS.md`, `STACK.md`, `PORTING_PLAN.md`, `RECON.md`)
 ⬜ **0.3** Install stack deps: zustand, @tanstack/react-query, axios, react-hook-form, zod, @hookform/resolvers, @react-native-async-storage/async-storage, expo-secure-store, expo-camera, expo-av, expo-haptics, react-native-webview, @sentry/react-native, @expo-google-fonts/inter
 ⬜ **0.4** Install Tamagui (`@tamagui/config`, `tamagui`, plus the expo-router config) and configure theme tokens with Kikwetu colors (#44433e, #699dcd, #48773E, #F4F4F6)
 ⬜ **0.5** `src/lib/storage.ts` — wrappers for AsyncStorage + SecureStore
