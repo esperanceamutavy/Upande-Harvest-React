@@ -48,6 +48,11 @@
 
 ## Phase 2 — App shell
 
+### Failure case verification (deferred from Phase 1)
+
+⬜ **F1** Wrong password — verify the Frappe error message appears as inline text below the Log In button (red, lineHeight 18, readable)
+⬜ **F2** Unreachable URL (e.g. type `nope.upande.com`) — verify "Cannot reach nope.upande.com — check your network connection." appears
+
 ⬜ **2.1** `src/app/(app)/_layout.tsx` — drawer or tab layout
 ⬜ **2.2** Dashboard route — fetch `GET /api/resource/Stock Entry?fields=["*"]&limit=1000&order_by=creation desc` via TanStack Query
 ⬜ **2.3** Filter by stock entry type — dropdown driven by `GET /api/resource/Stock Entry Type?fields=["name"]&limit=1000`
