@@ -24,6 +24,8 @@
 
 **Phase 0 acceptance:** App launches, shows login screen when no creds, navigates to a blank dashboard when creds present. No features yet, but the shell works on both iOS and Android via Expo Go.
 
+**Verified on device (Android, EAS dev client APK) — auth gate redirects to login placeholder, Tamagui renders, no crashes.**
+
 ---
 
 ## Phase 1 — Auth
