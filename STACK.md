@@ -81,6 +81,12 @@
 ## OTA updates
 - **EAS Update** — replaces Flutter's `upgrader` package and Shorebird
 
+## Phase 0 lessons learned
+
+- **Verify SDK 56 compatibility before assuming a package works.** `expo-av` was listed in initial planning but is incompatible with SDK 54+; it crashes at runtime with `NoClassDefFoundError`. Always cross-check against https://docs.expo.dev/versions/v56.0.0/ before committing a package choice.
+- **`npx expo install` over `npm install` for native modules.** It pins the version that matches the current SDK and automatically adds config plugins; bare `npm install` can pull in a mismatched version.
+- **Test the dev client APK after every native module addition.** JS-only changes are safe to OTA; anything that touches native code requires a rebuild before the crash surface is known.
+
 ## What we explicitly chose NOT to use
 - ❌ Redux / Redux Toolkit — overkill for this app's state shape
 - ❌ React Navigation — Expo Router is the modern default
