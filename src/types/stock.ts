@@ -18,3 +18,13 @@ export interface StockEntry {
 export interface StockEntryType {
   name: string;
 }
+
+/** Farm doctype. name === farm_name due to autoname "format:{farm_name}" — confirmed from Frappe schema. */
+export interface Farm {
+  name: string;
+}
+
+/** Warehouse doctype — only name is needed for station configuration. */
+export interface Warehouse {
+  name: string;
+}

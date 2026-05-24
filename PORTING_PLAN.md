@@ -69,8 +69,8 @@
 
 ## Phase 3 — Configure Station
 
-⬜ **3.1** Farm dropdown — `GET /api/resource/Farm?fields=["*"]&limit=1000`
-⬜ **3.2** Warehouse dropdown — `GET /api/resource/Warehouse?...&filters=[["disabled","=","0"]]`
+✅ **3.1** Farm dropdown — `GET /api/resource/Farm?fields=["name"]&limit=1000`
+✅ **3.2** Warehouse dropdown — `GET /api/resource/Warehouse?fields=["name"]&filters=[["disabled","=","0"]]&limit=5000` — pre-filtered to `startsWith('GHSE') || includes('GH')`
 ⬜ **3.3** Kikwetu-specific filtering logic — port from `configure_user_farm_screen.dart:299` (Main / EX-LEWA logic)
 ⬜ **3.4** Persist `userStation` JSON to AsyncStorage
 ⬜ **3.5** `useStation()` hook for downstream screens
