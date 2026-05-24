@@ -63,6 +63,8 @@
 
 **Phase 2 acceptance:** Real Kikwetu stock entries visible, list refreshes, drawer navigates to placeholder screens.
 
+**Device test deferred — network blocker (AP isolation on local Wi-Fi). Will run T1–T8 + F1, F2 in batch with Phase 3 testing.**
+
 ---
 
 ## Phase 3 — Configure Station
