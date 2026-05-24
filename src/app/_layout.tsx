@@ -8,6 +8,7 @@ import { TamaguiProvider } from 'tamagui';
 
 import { tamaguiConfig } from '../../tamagui.config';
 import '../lib/sentry'; // side-effect: initialises Sentry once at module load
+import { initAudio } from '../lib/audio';
 import { getSecureItem, getStorageItem, SECURE_KEYS, STORAGE_KEYS } from '../lib/storage';
 import { useAuthStore } from '../stores/auth';
 import { useStationStore } from '../stores/station';
@@ -35,6 +36,7 @@ function RootLayoutNav() {
   // Splash screen stays visible until this completes (Phase 1.5 polishes timing).
   useEffect(() => {
     async function hydrate() {
+      void initAudio(); // fire-and-forget; players needed before first workflow screen
       const [apiKey, apiSecret, instanceUrl, fullName, email, stationJson] = await Promise.all([
         getSecureItem(SECURE_KEYS.API_KEY),
         getSecureItem(SECURE_KEYS.API_SECRET),

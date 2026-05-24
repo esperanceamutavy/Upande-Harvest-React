@@ -9,3 +9,11 @@ export function heavyHaptic(): void {
 export function lightHaptic(): void {
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 }
+
+/** Namespace object so callers can do `haptics.heavy()` / `haptics.medium()` / `haptics.light()`.
+ *  medium maps to heavy — there is no distinct medium feedback level in Expo Haptics. */
+export const haptics = {
+  heavy: heavyHaptic,
+  medium: heavyHaptic,
+  light: lightHaptic,
+};

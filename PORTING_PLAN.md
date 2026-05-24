@@ -81,7 +81,7 @@
 
 ## Phase 4 — Kikwetu workflows (in order)
 
-### 4.1 ⬜ Harvesting — template-setter (every later workflow copies its pattern)
+### 4.1 🟨 Harvesting — template-setter (every later workflow copies its pattern)
 Form: variety, section, harvester (auto from section), stem length, qty. Camera scan for bucket QR. Validate bucket via `GET /api/resource/Bucket QR Code?filters=...`. Submit via `POST /api/resource/Stock Entry`. Audio: submit.mp3 success, error.mp3 fail. Haptics: heavy on warning. Day-of-week symbol (`@!?#+*/`).
 
 **Acceptance:** A harvester can complete a real harvesting entry on the Kikwetu staging instance using only the RN app.
