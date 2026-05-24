@@ -54,3 +54,11 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError<FrappeErrorBody>) => Promise.reject(parseFrappeError(error)),
 );
+
+export function extractFrappeError(e: unknown): string {
+  const err = e as { response?: { data?: { message?: string; exception?: string } }; message?: string };
+  return err.response?.data?.message
+    ?? err.response?.data?.exception
+    ?? err.message
+    ?? 'Unknown error';
+}

@@ -22,6 +22,7 @@ import { useGreenhouseData } from '../../../features/stock/useGreenhouseData';
 import { useBucketCheck } from '../../../features/stock/useBucketCheck';
 import { useCreateHarvestEntry } from '../../../features/stock/useCreateHarvestEntry';
 import { playSubmit, playError } from '../../../lib/audio';
+import { extractFrappeError } from '../../../lib/api';
 import { haptics } from '../../../lib/haptics';
 
 const PRIMARY = '#44433e';
@@ -84,6 +85,8 @@ export default function HarvestingScreen() {
     control,
     handleSubmit,
     setValue,
+    reset,
+    getValues,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -102,7 +105,7 @@ export default function HarvestingScreen() {
     if (!station) {
       router.replace('/configure');
     }
-  }, [station]);
+  }, [station, router]);
 
   const varieties = useMemo(
     () => greenhouseData?.custom_varieties_grown ?? [],
@@ -116,9 +119,9 @@ export default function HarvestingScreen() {
   // Auto-fill variety when greenhouse has exactly one — port of dart listener line 244-246
   useEffect(() => {
     if (varieties.length === 1) {
-      setValue('variety', varieties[0].variety);
+      setValue('variety', varieties[0].variety, { shouldValidate: true });
     }
-  }, [varieties]);
+  }, [varieties, setValue]);
 
   const sectionEmployeeMap = useMemo(
     () => Object.fromEntries(sections.map((s) => [s.section_name!, s.employee_name ?? ''])),
@@ -174,14 +177,19 @@ export default function HarvestingScreen() {
       playSubmit();
       setFeedback({ type: 'success', text: 'Harvesting entry submitted.' });
       // Partial reset — keep variety/section/harvester for batch entry (port of dart clearForm:97-104)
-      setValue('stemLength', '');
-      setValue('quantity', '' as unknown as number);
-      setValue('bucketId', '');
+      reset({
+        variety: getValues('variety'),
+        section: getValues('section'),
+        harvester: getValues('harvester'),
+        stemLength: '',
+        quantity: undefined as unknown as number,
+        bucketId: '',
+      });
     } catch (e) {
       playError();
       setFeedback({
         type: 'error',
-        text: (e as { message?: string }).message ?? 'Submission failed.',
+        text: extractFrappeError(e),
       });
     } finally {
       setIsSubmitting(false);
@@ -279,7 +287,7 @@ export default function HarvestingScreen() {
                     onValueChange={(val) => {
                       onChange(val);
                       // Auto-fill harvester from section's employee_name — port of dart lines 431-438
-                      setValue('harvester', sectionEmployeeMap[val] ?? '');
+                      setValue('harvester', sectionEmployeeMap[val] ?? '', { shouldValidate: true });
                     }}
                     placeholder="Select section…"
                     items={sections.map((s) => ({
