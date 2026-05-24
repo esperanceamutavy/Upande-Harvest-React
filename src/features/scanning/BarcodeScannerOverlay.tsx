@@ -66,14 +66,16 @@ export function BarcodeScannerOverlay({ visible, onScan, onCancel }: BarcodeScan
           style={StyleSheet.absoluteFill}
           facing="back"
           barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+          // Note: onBarcodeScanned fires repeatedly (~30 fps) while a QR is in view.
+          // hasScanned ref ensures we only process the first detection.
           onBarcodeScanned={(result) => {
             if (hasScanned.current) return;
             hasScanned.current = true;
             playBeep();
-            // 300ms delay matches Flutter barcode_scanner.dart:48
+            // 500ms delay — gives audio feedback time to complete before transitioning
             setTimeout(() => {
               onScan(result.data);
-            }, 300);
+            }, 500);
           }}
         />
         <Pressable style={styles.closeBtn} onPress={onCancel} hitSlop={8}>
