@@ -24,6 +24,7 @@ import { useCreateHarvestEntry } from '../../../features/stock/useCreateHarvestE
 import { playSubmit, playError } from '../../../lib/audio';
 import { extractFrappeError } from '../../../lib/api';
 import { haptics } from '../../../lib/haptics';
+import { BarcodeScannerOverlay } from '../../../features/scanning/BarcodeScannerOverlay';
 
 const PRIMARY = '#44433e';
 const ACCENT = '#699dcd';
@@ -80,6 +81,7 @@ export default function HarvestingScreen() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackMsg | null>(null);
+  const [scannerVisible, setScannerVisible] = useState(false);
 
   const {
     control,
@@ -130,6 +132,22 @@ export default function HarvestingScreen() {
 
   const isLoading = stemLoading || ghLoading;
   const symbol = getDaySymbol();
+
+  function handleScan(raw: string) {
+    setScannerVisible(false);
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === 'object' && typeof (parsed as Record<string, unknown>).bucket_id === 'string') {
+        setValue('bucketId', ((parsed as Record<string, unknown>).bucket_id as string).toUpperCase(), { shouldValidate: true });
+      } else {
+        setFeedback({ type: 'warning', text: 'Please scan a valid bucket QR code' });
+        haptics.medium();
+      }
+    } catch {
+      setFeedback({ type: 'warning', text: 'Invalid QR code format' });
+      haptics.medium();
+    }
+  }
 
   async function onSubmit(data: FormValues) {
     if (!station) return;
@@ -384,13 +402,7 @@ export default function HarvestingScreen() {
                     />
                     <Pressable
                       style={styles.qrBtn}
-                      onPress={() =>
-                        Alert.alert(
-                          'Barcode Scanner',
-                          'Coming in Phase 4.1b.',
-                          [{ text: 'OK' }],
-                        )
-                      }
+                      onPress={() => setScannerVisible(true)}
                     >
                       <QrCode size={22} color={ACCENT} />
                     </Pressable>
@@ -439,6 +451,11 @@ export default function HarvestingScreen() {
           </YStack>
         </ScrollView>
       )}
+      <BarcodeScannerOverlay
+        visible={scannerVisible}
+        onScan={handleScan}
+        onCancel={() => setScannerVisible(false)}
+      />
     </SafeAreaView>
   );
 }
