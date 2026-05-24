@@ -54,9 +54,19 @@ function RootLayoutNav() {
       }
       if (stationJson) {
         try {
-          setStation(JSON.parse(stationJson));
+          const parsed = JSON.parse(stationJson);
+          if (
+            parsed &&
+            typeof parsed === 'object' &&
+            typeof parsed.farm === 'string' &&
+            typeof parsed.warehouse === 'string' &&
+            typeof parsed.farmName === 'string' &&
+            typeof parsed.warehouseName === 'string'
+          ) {
+            setStation(parsed);
+          }
         } catch {
-          // corrupt value — silently skip; user will reconfigure
+          // corrupt JSON — silently skip
         }
       }
       setHydrated(true);

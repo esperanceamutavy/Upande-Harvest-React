@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -34,8 +34,17 @@ export default function ConfigureStation() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
   const [validationError, setValidationError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, []);
 
   // Port of configure_user_farm_screen.dart:284-311: filter warehouses by selected farm.
   // farm "Main" → exclude EX; farm "EX-LEWA" → only EX.
@@ -74,16 +83,18 @@ export default function ConfigureStation() {
   }
 
   const handleSave = useCallback(async () => {
+    if (isSaving) return;
     if (!selectedFarm) {
       setValidationError('Please select a farm.');
       haptics.heavy();
       return;
     }
     if (!selectedWarehouse) {
-      setValidationError('Please select a station from the list.');
+      setValidationError('Tap a station from the suggestions list to select it.');
       haptics.heavy();
       return;
     }
+    setIsSaving(true);
     const station = {
       farm: selectedFarm,
       farmName: selectedFarm,
@@ -94,8 +105,8 @@ export default function ConfigureStation() {
     setStation(station);
     setSavedMsg(true);
     setValidationError('');
-    setTimeout(() => router.back(), 1500);
-  }, [selectedFarm, selectedWarehouse, setStation, router]);
+    saveTimer.current = setTimeout(() => router.back(), 1500);
+  }, [isSaving, selectedFarm, selectedWarehouse, setStation, router]);
 
   const isLoading = farmsLoading || warehousesLoading;
 
@@ -211,11 +222,13 @@ export default function ConfigureStation() {
 
             <Button
               onPress={() => void handleSave()}
+              disabled={isSaving}
+              opacity={isSaving ? 0.6 : 1}
               backgroundColor={PRIMARY}
               color="white"
               size="$4"
             >
-              Save
+              {isSaving ? 'Saving...' : 'Save'}
             </Button>
           </YStack>
         </ScrollView>

@@ -10,7 +10,10 @@ async function fetchWarehouses(): Promise<Warehouse[]> {
       limit: 5000,
     },
   });
-  // Port of configure_user_farm_screen.dart:70-79: keep only greenhouse-named warehouses
+  // Port of configure_user_farm_screen.dart:70-79 — keep only greenhouse-named warehouses.
+  // NOTE: Flutter uses `.contains('GH')` which is intentionally loose.
+  // On device test, verify Kikwetu's warehouse names don't have false positives
+  // (e.g., "OUTGOING-XYZ" would slip through). If they do, tighten to startsWith.
   return res.data.data.filter(
     (w) => w.name.startsWith('GHSE') || w.name.includes('GH'),
   );
