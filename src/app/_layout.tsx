@@ -10,6 +10,7 @@ import { tamaguiConfig } from '../../tamagui.config';
 import '../lib/sentry'; // side-effect: initialises Sentry once at module load
 import { getSecureItem, getStorageItem, SECURE_KEYS, STORAGE_KEYS } from '../lib/storage';
 import { useAuthStore } from '../stores/auth';
+import { useStationStore } from '../stores/station';
 
 const queryClient = new QueryClient();
 
@@ -17,6 +18,7 @@ function RootLayoutNav() {
   const [hydrated, setHydrated] = useState(false);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const setCredentials = useAuthStore((s) => s.setCredentials);
+  const setStation = useStationStore((s) => s.setStation);
   const segments = useSegments();
   const router = useRouter();
 
@@ -33,12 +35,13 @@ function RootLayoutNav() {
   // Splash screen stays visible until this completes (Phase 1.5 polishes timing).
   useEffect(() => {
     async function hydrate() {
-      const [apiKey, apiSecret, instanceUrl, fullName, email] = await Promise.all([
+      const [apiKey, apiSecret, instanceUrl, fullName, email, stationJson] = await Promise.all([
         getSecureItem(SECURE_KEYS.API_KEY),
         getSecureItem(SECURE_KEYS.API_SECRET),
         getSecureItem(SECURE_KEYS.INSTANCE_URL),
         getStorageItem('fullname'),
         getStorageItem(STORAGE_KEYS.EMAIL_BACKUP),
+        getStorageItem(STORAGE_KEYS.USER_STATION),
       ]);
       if (apiKey && apiSecret && instanceUrl) {
         setCredentials({
@@ -48,6 +51,13 @@ function RootLayoutNav() {
           fullName: fullName ?? '',
           email: email ?? '',
         });
+      }
+      if (stationJson) {
+        try {
+          setStation(JSON.parse(stationJson));
+        } catch {
+          // corrupt value — silently skip; user will reconfigure
+        }
       }
       setHydrated(true);
       await SplashScreen.hideAsync();
