@@ -55,6 +55,7 @@ export default function ReceivingScreen() {
   const [scannerVisible, setScannerVisible] = useState(false);
 
   const isSettingProgrammaticallyRef = useRef(false);
+  const isProcessingRef = useRef(false);
   const textInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
@@ -65,6 +66,7 @@ export default function ReceivingScreen() {
 
   function resetState() {
     setIsProcessing(false);
+    isProcessingRef.current = false;
     isSettingProgrammaticallyRef.current = true;
     setBucketIdInput('');
     setTimeout(() => {
@@ -74,7 +76,15 @@ export default function ReceivingScreen() {
   }
 
   async function routeToReceivingFlow(bucketId: string) {
-    const buckets = await bucketCheck.mutateAsync(bucketId);
+    let buckets;
+    try {
+      buckets = await bucketCheck.mutateAsync(bucketId);
+    } catch (e) {
+      playError();
+      setFeedback({ type: 'error', text: extractFrappeError(e) });
+      resetState();
+      return;
+    }
     if (buckets.length === 0) {
       setFeedback({ type: 'warning', text: 'The bucket QR code does not exist.' });
       playError();
@@ -115,6 +125,7 @@ export default function ReceivingScreen() {
 
   async function handleScannedData(raw: string) {
     setIsProcessing(true);
+    isProcessingRef.current = true;
     setFeedback(null);
     try {
       const parsed = JSON.parse(raw) as unknown;
@@ -145,7 +156,7 @@ export default function ReceivingScreen() {
     if (isSettingProgrammaticallyRef.current) return;
     setBucketIdInput(text);
     const trimmed = text.trim();
-    if (trimmed.endsWith('}') && isValidJson(trimmed) && !isProcessing) {
+    if (trimmed.endsWith('}') && isValidJson(trimmed) && !isProcessingRef.current) {
       void handleScannedData(trimmed);
     }
   }
