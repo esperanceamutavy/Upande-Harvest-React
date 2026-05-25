@@ -94,8 +94,10 @@ Camera scan OR HID scan (hidden focused TextInput watching for JSON ending in `}
 
 **Acceptance:** Receiving works with both phone camera AND the HID hardware scanner.
 
-### 4.3 🟨 Grading (Grading Test deferred indefinitely)
+### 4.3 🟨 Grading (per-bunch via grader3, Grading Test deferred indefinitely)
 Two-scan: grader badge QR → bunch label QR. Validate bunch not already graded via `GET /api/resource/Stock Entry?filters=[["custom_bunch_id","=","..."]]`. Submit via `POST /api/method/createGradingStockEntry` (or `...Test`).
+
+> **Rewritten 2026-05-25:** Original implementation called a non-existent endpoint. Now calls `/api/method/grader3` with `{farm, variety, stem_length, grader, bunch_id}`. Bunch QR carries `{grader, stem_length, bunch_id}`, variety QR carries `{variety}`. Order-agnostic scanning. Server enforces 100s lockout per bunch_id.
 
 **Acceptance:** Both grading flows work; double-scan prevention works.
 

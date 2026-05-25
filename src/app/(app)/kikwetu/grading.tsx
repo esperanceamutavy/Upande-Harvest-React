@@ -6,43 +6,41 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { MoreVertical, QrCode } from 'lucide-react-native';
+import { Check, MoreVertical, QrCode } from 'lucide-react-native';
 
 import { useStation } from '../../../features/station/useStation';
-import { useEntryByBunch } from '../../../features/grading/useEntryByBunch';
 import { useCreateGradingEntry } from '../../../features/grading/useCreateGradingEntry';
 import { playSubmit, playError } from '../../../lib/audio';
 import { haptics } from '../../../lib/haptics';
 import { extractFrappeError } from '../../../lib/api';
 import { BarcodeScannerOverlay } from '../../../features/scanning/BarcodeScannerOverlay';
 import { AppBar } from '../../../components/ui/AppBar';
-import { Field } from '../../../components/ui/Field';
 import { Pill } from '../../../components/ui/Pill';
 import { colors, radii, spacing } from '../../../components/ui/theme';
-import type { GradingPayload, ScannedBunchData } from '../../../types/grading';
+import type {
+  GradingPayload,
+  ScannedBunch,
+  ScannedVariety,
+} from '../../../types/grading';
 
 const ACCENT = colors.accent;
 
 type FeedbackMsg = { type: 'success' | 'warning' | 'error'; text: string };
-type ScannerMode = 'grader' | 'bunch';
 
 export default function GradingScreen() {
   const router = useRouter();
   const station = useStation();
-  const entryByBunch = useEntryByBunch();
   const createGradingEntry = useCreateGradingEntry();
 
-  const [graderInput, setGraderInput] = useState('');
-  const [bunchInput, setBunchInput] = useState('');
-  const [lastScannedBunch, setLastScannedBunch] = useState<ScannedBunchData | null>(null);
+  const [bunchScan, setBunchScan] = useState<ScannedBunch | null>(null);
+  const [varietyScan, setVarietyScan] = useState<ScannedVariety | null>(null);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackMsg | null>(null);
-  const [scannerVisible, setScannerVisible] = useState<ScannerMode | null>(null);
+  const [scannerVisible, setScannerVisible] = useState(false);
 
   const isProcessingRef = useRef(false);
 
@@ -54,136 +52,113 @@ export default function GradingScreen() {
 
   if (!station) return null;
 
-  function resetCycle() {
-    setBunchInput('');
-    setLastScannedBunch(null);
-    setLoading(false);
-    isProcessingRef.current = false;
-    // graderInput INTENTIONALLY preserved across cycles. Same grader keeps grading bunches.
-  }
-
   function warn(text: string) {
     setFeedback({ type: 'warning', text });
     playError();
     haptics.medium();
   }
 
-  function processGraderQR(raw: string) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      warn('Invalid QR code format');
-      return;
-    }
-    if (!parsed || typeof parsed !== 'object') {
-      warn('Invalid QR code format');
-      return;
-    }
-    const p = parsed as Record<string, unknown>;
-    if (typeof p.grader !== 'string') {
-      warn('Please scan a valid grader QR code');
-      return;
-    }
-    setGraderInput(p.grader);
+  function reset() {
+    setBunchScan(null);
+    setVarietyScan(null);
     setFeedback(null);
   }
 
-  async function submitGrading(scannedData: ScannedBunchData) {
+  async function maybeSubmit(bunch: ScannedBunch | null, variety: ScannedVariety | null) {
+    if (!bunch || !variety) return;
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    setLoading(true);
+
     const payload: GradingPayload = {
       farm: station!.farm,
-      stock_entry_type: 'Grading',
-      graded_by: graderInput,
-      stem_length: scannedData.stem_length,
-      bunch_size: scannedData.bunch_size,
-      bunch_id: scannedData.bunch_id,
-      variety: scannedData.variety,
-      quantity: 1,
+      variety: variety.variety,
+      stem_length: bunch.stem_length,
+      grader: bunch.grader,
+      bunch_id: bunch.bunch_id,
     };
+
     try {
-      await createGradingEntry.mutateAsync(payload);
-      playSubmit();
-      setFeedback({ type: 'success', text: 'Bunch graded successfully' });
-      resetCycle();
+      const res = await createGradingEntry.mutateAsync(payload);
+      if (res.error === 'lockout_active') {
+        playError();
+        setFeedback({
+          type: 'warning',
+          text: res.message || 'This bunch was just graded. Please wait a moment.',
+        });
+      } else if (res.stock_entry) {
+        playSubmit();
+        setFeedback({ type: 'success', text: `Graded: ${bunch.bunch_id}` });
+      } else {
+        playError();
+        setFeedback({ type: 'error', text: res.message || 'Submission failed' });
+      }
     } catch (e) {
       playError();
       setFeedback({ type: 'error', text: extractFrappeError(e) });
-      resetCycle();
+    } finally {
+      setBunchScan(null);
+      setVarietyScan(null);
+      setLoading(false);
+      isProcessingRef.current = false;
     }
-  }
-
-  async function processBunchQR(raw: string) {
-    if (isProcessingRef.current || loading) return;
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      warn('Invalid QR code format');
-      return;
-    }
-    if (!parsed || typeof parsed !== 'object') {
-      warn('Invalid QR code format');
-      return;
-    }
-    const p = parsed as Record<string, unknown>;
-    if (
-      typeof p.bunch_id !== 'string' ||
-      typeof p.variety !== 'string' ||
-      typeof p.bunch_size !== 'string' ||
-      typeof p.stem_length !== 'string'
-    ) {
-      warn('Please scan a valid bunch QR code');
-      return;
-    }
-    if (!graderInput) {
-      warn('Please scan the grader QR code first');
-      return;
-    }
-
-    const scannedData: ScannedBunchData = {
-      bunch_id: p.bunch_id,
-      variety: p.variety,
-      bunch_size: p.bunch_size,
-      stem_length: p.stem_length,
-    };
-    setLastScannedBunch(scannedData);
-    setBunchInput(scannedData.bunch_id);
-    setLoading(true);
-    isProcessingRef.current = true;
-    setFeedback(null);
-
-    let entries;
-    try {
-      entries = await entryByBunch.mutateAsync({ bunchId: scannedData.bunch_id });
-    } catch (e) {
-      playError();
-      setFeedback({ type: 'error', text: extractFrappeError(e) });
-      resetCycle();
-      return;
-    }
-
-    if (entries[0]?.custom_scanned_grading === 1) {
-      playError();
-      setFeedback({ type: 'warning', text: 'The bunch has already been graded' });
-      resetCycle();
-      return;
-    }
-
-    await submitGrading(scannedData);
   }
 
   function handleScan(raw: string) {
-    const mode = scannerVisible;
-    setScannerVisible(null);
-    if (mode === 'grader') {
-      processGraderQR(raw);
-    } else if (mode === 'bunch') {
-      void processBunchQR(raw);
+    setScannerVisible(false);
+    if (isProcessingRef.current) return;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      warn('Invalid QR code format');
+      return;
     }
+    if (!parsed || typeof parsed !== 'object') {
+      warn('Invalid QR code format');
+      return;
+    }
+    const p = parsed as Record<string, unknown>;
+
+    if (
+      typeof p.bunch_id === 'string' &&
+      typeof p.grader === 'string' &&
+      typeof p.stem_length === 'string'
+    ) {
+      const bunch: ScannedBunch = {
+        grader: p.grader,
+        stem_length: p.stem_length,
+        bunch_id: p.bunch_id,
+      };
+      setBunchScan(bunch);
+      setFeedback(null);
+      void maybeSubmit(bunch, varietyScan);
+      return;
+    }
+
+    if (typeof p.variety === 'string' && !p.bunch_id) {
+      const variety: ScannedVariety = { variety: p.variety };
+      setVarietyScan(variety);
+      setFeedback(null);
+      void maybeSubmit(bunchScan, variety);
+      return;
+    }
+
+    warn('Unknown QR format — please scan a bunch label or variety QR');
   }
 
-  const bunchScanDisabled = loading || !graderInput;
+  const hint = loading
+    ? 'Submitting…'
+    : bunchScan && varietyScan
+      ? 'Submitting…'
+      : bunchScan
+        ? 'Now scan the variety QR'
+        : varietyScan
+          ? 'Now scan the bunch QR'
+          : 'Scan the bunch QR and variety QR in any order';
+
+  const hasAnyScan = bunchScan !== null || varietyScan !== null;
 
   return (
     <SafeAreaView style={styles.root}>
@@ -192,7 +167,7 @@ export default function GradingScreen() {
         onBack={() => router.back()}
         rightAction={{
           icon: <MoreVertical size={22} color="white" />,
-          onPress: () => Alert.alert('Grading Report', 'Coming in Phase 5.', [{ text: 'OK' }]),
+          onPress: () => Alert.alert('Reports', 'Reports coming in Phase 5.', [{ text: 'OK' }]),
         }}
       />
 
@@ -202,67 +177,51 @@ export default function GradingScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.form}>
-          {/* Grader */}
-          <Field label="Grader">
-            <View style={styles.row}>
-              <TextInput
-                style={[styles.input, styles.rowInput]}
-                value={graderInput}
-                editable={false}
-                placeholder="Tap QR icon to scan"
-                placeholderTextColor={colors.muted}
-              />
-              <Pressable
-                style={[styles.qrBtn, loading && styles.qrBtnDisabled]}
-                onPress={() => {
-                  if (!loading) setScannerVisible('grader');
-                }}
-                disabled={loading}
-              >
-                <QrCode size={22} color={ACCENT} />
-              </Pressable>
-            </View>
-            {graderInput ? (
-              <Pressable onPress={() => setGraderInput('')} hitSlop={8}>
-                <Text style={styles.changeLinkInline}>Change Grader</Text>
-              </Pressable>
-            ) : null}
-          </Field>
+          {/* Scan slot cards */}
+          <View style={styles.slotRow}>
+            <ScanSlot
+              label="Bunch"
+              value={bunchScan?.bunch_id ?? null}
+              filled={bunchScan !== null}
+            />
+            <ScanSlot
+              label="Variety"
+              value={varietyScan?.variety ?? null}
+              filled={varietyScan !== null}
+            />
+          </View>
 
-          {/* Bunch Details */}
-          <View style={styles.fieldBlock}>
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Bunch Details</Text>
-              {loading ? <ActivityIndicator size="small" color={ACCENT} /> : null}
-            </View>
-            <View style={styles.row}>
-              <TextInput
-                style={[styles.input, styles.rowInput]}
-                value={bunchInput}
-                editable={false}
-                placeholder="Tap QR icon to scan"
-                placeholderTextColor={colors.muted}
-              />
-              <Pressable
-                style={[styles.qrBtn, bunchScanDisabled && styles.qrBtnDisabled]}
-                onPress={() => {
-                  if (loading) return;
-                  if (!graderInput) {
-                    Alert.alert('Grader required', 'Scan the grader QR code first.', [
-                      { text: 'OK' },
-                    ]);
-                    return;
-                  }
-                  setScannerVisible('bunch');
-                }}
-              >
-                <QrCode size={22} color={ACCENT} />
-              </Pressable>
-            </View>
+          {/* Big Scan QR button */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.scanBtn,
+              loading && styles.scanBtnDisabled,
+              pressed && !loading && styles.scanBtnPressed,
+            ]}
+            onPress={() => {
+              if (!loading) setScannerVisible(true);
+            }}
+            disabled={loading}
+          >
+            <QrCode size={22} color="white" />
+            <Text style={styles.scanBtnText}>Scan QR</Text>
+          </Pressable>
+
+          {/* Hint */}
+          <View style={styles.hintRow}>
+            {loading ? <ActivityIndicator size="small" color={ACCENT} /> : null}
+            <Text style={styles.hint}>{hint}</Text>
           </View>
 
           {/* Feedback */}
           {feedback ? <Pill variant={feedback.type}>{feedback.text}</Pill> : null}
+
+          {/* Reset link */}
+          {hasAnyScan && !loading ? (
+            <Pressable onPress={reset} hitSlop={8} style={styles.resetWrap}>
+              <Text style={styles.resetLink}>Reset</Text>
+            </Pressable>
+          ) : null}
 
           {/* Station footer */}
           <View style={styles.stationFooter}>
@@ -277,11 +236,33 @@ export default function GradingScreen() {
       </ScrollView>
 
       <BarcodeScannerOverlay
-        visible={scannerVisible !== null}
+        visible={scannerVisible}
         onScan={handleScan}
-        onCancel={() => setScannerVisible(null)}
+        onCancel={() => setScannerVisible(false)}
       />
     </SafeAreaView>
+  );
+}
+
+function ScanSlot({
+  label,
+  value,
+  filled,
+}: {
+  label: string;
+  value: string | null;
+  filled: boolean;
+}) {
+  return (
+    <View style={[styles.slot, filled && styles.slotFilled]}>
+      <View style={styles.slotHeader}>
+        <Text style={styles.slotLabel}>{label}</Text>
+        {filled ? <Check size={16} color={colors.success} /> : null}
+      </View>
+      <Text style={[styles.slotValue, !value && styles.slotValueEmpty]} numberOfLines={1}>
+        {value ?? 'Tap below to scan'}
+      </Text>
+    </View>
   );
 }
 
@@ -290,35 +271,56 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
   form: { gap: spacing.md },
-  fieldBlock: { gap: spacing.xs },
-  labelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  label: { fontSize: 14, fontWeight: '600', color: colors.primary },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  rowInput: { flex: 1 },
-  input: {
+  slotRow: { flexDirection: 'row', gap: spacing.md },
+  slot: {
+    flex: 1,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: colors.primary,
     backgroundColor: colors.surface,
+    padding: spacing.md,
+    gap: spacing.xs,
   },
-  qrBtn: {
-    padding: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(105,157,205,0.4)',
+  slotFilled: {
+    borderColor: colors.success,
+    backgroundColor: colors.success + '0F',
+  },
+  slotHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  slotLabel: { fontSize: 13, fontWeight: '600', color: colors.primary },
+  slotValue: { fontSize: 14, color: colors.primary },
+  slotValueEmpty: { color: colors.muted, fontStyle: 'italic' },
+  scanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.primary,
     borderRadius: radii.md,
-    backgroundColor: colors.surface,
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
   },
-  qrBtnDisabled: { opacity: 0.4 },
-  changeLinkInline: { color: colors.accent, fontSize: 13, marginTop: 4 },
+  scanBtnPressed: { opacity: 0.85 },
+  scanBtnDisabled: { opacity: 0.4 },
+  scanBtnText: { color: 'white', fontSize: 15, fontWeight: '600' },
+  hintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  hint: { fontSize: 13, color: colors.muted, textAlign: 'center' },
+  resetWrap: { alignSelf: 'center' },
+  resetLink: { fontSize: 13, color: colors.accent, fontWeight: '600' },
   stationFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingTop: spacing.xs,
+    marginTop: spacing.sm,
   },
   stationText: { fontSize: 13, color: colors.primary, flex: 1 },
   changeLink: { fontSize: 13, color: ACCENT, fontWeight: '600' },
