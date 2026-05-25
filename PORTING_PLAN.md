@@ -94,7 +94,7 @@ Camera scan OR HID scan (hidden focused TextInput watching for JSON ending in `}
 
 **Acceptance:** Receiving works with both phone camera AND the HID hardware scanner.
 
-### 4.3 ⬜ Grading + Grading Test (two screens, shared component)
+### 4.3 🟨 Grading (Grading Test deferred indefinitely)
 Two-scan: grader badge QR → bunch label QR. Validate bunch not already graded via `GET /api/resource/Stock Entry?filters=[["custom_bunch_id","=","..."]]`. Submit via `POST /api/method/createGradingStockEntry` (or `...Test`).
 
 **Acceptance:** Both grading flows work; double-scan prevention works.
