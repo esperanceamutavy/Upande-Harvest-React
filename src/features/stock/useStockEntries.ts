@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../../lib/api';
 import type { StockEntry } from '../../types/stock';
+import { ALLOWED_STOCK_ENTRY_TYPES } from './allowedTypes';
 
 // Narrow field list — only what the dashboard list renders.
 // Flutter fetches fields=["*"] but that pulls child tables unnecessarily.
@@ -11,6 +12,7 @@ async function fetchStockEntries(): Promise<StockEntry[]> {
   const res = await apiClient.get<{ data: StockEntry[] }>('/api/resource/Stock Entry', {
     params: {
       fields: JSON.stringify(FIELDS),
+      filters: JSON.stringify([['stock_entry_type', 'in', ALLOWED_STOCK_ENTRY_TYPES]]),
       limit: 1000,
       order_by: 'creation desc',
     },

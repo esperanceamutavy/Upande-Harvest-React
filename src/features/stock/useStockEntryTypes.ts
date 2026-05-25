@@ -1,27 +1,12 @@
-import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '../../lib/api';
-import type { StockEntryType } from '../../types/stock';
+import { ALLOWED_STOCK_ENTRY_TYPES } from './allowedTypes';
 
-// Matches the allowlist in Flutter entry_list_view.dart:940-945
-const ALLOWED_TYPES = new Set(['Harvesting', 'Receiving', 'Grading', 'Packing']);
-
-async function fetchStockEntryTypes(): Promise<string[]> {
-  const res = await apiClient.get<{ data: StockEntryType[] }>('/api/resource/Stock Entry Type', {
-    params: {
-      fields: JSON.stringify(['name']),
-      limit: 1000,
-    },
-  });
-  return res.data.data
-    .map((t) => t.name)
-    .filter((name) => ALLOWED_TYPES.has(name));
-}
-
+// The allowlist IS the source of truth — we no longer fetch Stock Entry Types
+// from Frappe. Workers may only file the 5 types defined in allowedTypes.ts.
+// Shape mimics a TanStack useQuery result so the dashboard consumer is unchanged.
 export function useStockEntryTypes() {
-  return useQuery({
-    queryKey: ['stock-entry-types'],
-    queryFn: fetchStockEntryTypes,
-    staleTime: 10 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
+  return {
+    data: ALLOWED_STOCK_ENTRY_TYPES as string[],
+    isLoading: false,
+    error: null,
+  };
 }
