@@ -32,6 +32,7 @@ export const tamaguiConfig = createTamagui({
   },
 });
 
+export const config = tamaguiConfig;
 export default tamaguiConfig;
 
 export type Conf = typeof tamaguiConfig;
