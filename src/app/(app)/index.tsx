@@ -1,18 +1,29 @@
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Modal,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Adapt, Button, Select, Sheet, Text, XStack, YStack } from 'tamagui';
 import { useRouter } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Calendar, ChevronDown, Menu, X } from 'lucide-react-native';
+import { Calendar, Menu, X } from 'lucide-react-native';
 
 import { useAuthStore } from '../../stores/auth';
 import { useStockEntries } from '../../features/stock/useStockEntries';
 import { useStockEntryTypes } from '../../features/stock/useStockEntryTypes';
-import { AppDrawer } from '../../components/AppDrawer';
+import { useLogout } from '../../features/auth/useLogout';
+// TODO (commit 3): restore when AppDrawer is rewritten without Tamagui
+// import { AppDrawer } from '../../components/AppDrawer';
 import type { StockEntry } from '../../types/stock';
-
-const PRIMARY = '#44433e';
+import { Button } from '../../components/ui/Button';
+import { Picker } from '../../components/ui/Picker';
+import { colors, radii, spacing, typography } from '../../components/ui/theme';
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -31,6 +42,7 @@ function fmtDate(d: Date): string {
 export default function Dashboard() {
   const router = useRouter();
   const fullName = useAuthStore((s) => s.fullName);
+  const { logout } = useLogout();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedType, setSelectedType] = useState('All');
@@ -42,6 +54,10 @@ export default function Dashboard() {
   const { data: entryTypes = [] } = useStockEntryTypes();
 
   const typeOptions = useMemo(() => ['All', ...entryTypes], [entryTypes]);
+  const pickerItems = useMemo(
+    () => typeOptions.map((t) => ({ label: t, value: t })),
+    [typeOptions],
+  );
 
   const filteredEntries = useMemo(() => {
     return entries.filter((e) => {
@@ -65,24 +81,19 @@ export default function Dashboard() {
     ({ item }: { item: StockEntry }) => (
       <Pressable
         onPress={() => router.push(`/kikwetu/stock-entry/${item.name}`)}
-        style={styles.row}
+        style={styles.card}
       >
-        <YStack flex={1} gap={2}>
-          <XStack gap="$2" alignItems="center">
-            <Text fontSize={13}>{item.posting_date}</Text>
-            <Text
-              fontSize={12}
-              color={item.docstatus === 1 ? '$success' : '$red10'}
-            >
+        <View style={styles.cardLeft}>
+          <Text style={styles.entryType}>{item.stock_entry_type?.toUpperCase() ?? ''}</Text>
+          <Text style={styles.entryName}>{item.name}</Text>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaDate}>{item.posting_date}</Text>
+            <Text style={[styles.metaStatus, item.docstatus === 1 ? styles.submitted : styles.draft]}>
               {item.docstatus === 1 ? 'Submitted' : 'Draft'}
             </Text>
-          </XStack>
-          <Text color="$primary" fontSize={14}>{item.name}</Text>
-          <Text color="$primary" fontSize={13} fontWeight="bold">
-            {item.stock_entry_type?.toUpperCase() ?? ''}
-          </Text>
-        </YStack>
-        <Text fontSize={17} fontWeight="bold">
+          </View>
+        </View>
+        <Text style={styles.amount}>
           {item.total_amount != null
             ? `${item.total_amount.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} /-`
             : '—'}
@@ -94,111 +105,104 @@ export default function Dashboard() {
 
   return (
     <SafeAreaView style={styles.root}>
-      <AppDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      {/* Temporary drawer placeholder — replaced in commit 3 with full AppDrawer rewrite */}
+      <Modal
+        transparent
+        animationType="slide"
+        visible={drawerOpen}
+        onRequestClose={() => setDrawerOpen(false)}
+      >
+        <Pressable style={styles.drawerOverlay} onPress={() => setDrawerOpen(false)}>
+          <View style={styles.drawerPanel}>
+            <Text style={styles.drawerName}>{fullName || 'User'}</Text>
+            <Button
+              onPress={() => { void logout(); setDrawerOpen(false); }}
+              variant="ghost"
+            >
+              Logout
+            </Button>
+          </View>
+        </Pressable>
+      </Modal>
 
       {/* Header */}
-      <XStack paddingHorizontal="$3" paddingVertical="$2" alignItems="center" gap="$2">
-        <Pressable onPress={() => setDrawerOpen(true)} style={styles.iconBtn}>
-          <Menu size={28} color={PRIMARY} />
+      <View style={styles.header}>
+        <Pressable onPress={() => setDrawerOpen(true)} style={styles.menuBtn}>
+          <Menu size={28} color={colors.primary} />
         </Pressable>
-        <YStack flex={1}>
-          <Text fontSize={22} fontWeight="600" color="$primary">{getGreeting()}</Text>
-          <Text fontSize={16} fontWeight="bold" color="$primary">{fullName || 'User'}</Text>
-        </YStack>
-      </XStack>
+        <View style={styles.greeting}>
+          <Text style={styles.greetingText}>{getGreeting()}</Text>
+          <Text style={styles.greetingName}>{fullName || 'User'}</Text>
+        </View>
+      </View>
 
       {/* Filter bar */}
-      <XStack paddingHorizontal="$3" paddingBottom="$2" alignItems="center" gap="$2">
-        <Text fontWeight="600" fontSize={13} flexShrink={0}>Type:</Text>
-
-        <Select value={selectedType} onValueChange={setSelectedType}>
-          <Select.Trigger flex={1} iconAfter={<ChevronDown size={14} color={PRIMARY} />}>
-            <Select.Value />
-          </Select.Trigger>
-
-          <Adapt when="sm" platform="touch">
-            <Sheet dismissOnSnapToBottom snapPoints={[40]}>
-              <Sheet.Frame padding="$4">
-                <Sheet.ScrollView>
-                  <Adapt.Contents />
-                </Sheet.ScrollView>
-              </Sheet.Frame>
-              <Sheet.Overlay />
-            </Sheet>
-          </Adapt>
-
-          <Select.Content>
-            <Select.Viewport>
-              {typeOptions.map((type, i) => (
-                <Select.Item key={type} index={i} value={type}>
-                  <Select.ItemText>{type}</Select.ItemText>
-                </Select.Item>
-              ))}
-            </Select.Viewport>
-          </Select.Content>
-        </Select>
+      <View style={styles.filterBar}>
+        <Text style={styles.filterLabel}>Type:</Text>
+        <View style={styles.typePicker}>
+          <Picker
+            value={selectedType}
+            onValueChange={setSelectedType}
+            placeholder="All"
+            items={pickerItems}
+          />
+        </View>
 
         <Pressable onPress={() => setShowPicker('from')} style={styles.dateBtn}>
-          <Calendar size={14} color={PRIMARY} />
-          <Text fontSize={12} marginLeft={4} color="$primary">
-            {fromDate ? fmtDate(fromDate) : 'From'}
-          </Text>
+          <Calendar size={14} color={colors.primary} />
+          <Text style={styles.dateBtnText}>{fromDate ? fmtDate(fromDate) : 'From'}</Text>
         </Pressable>
 
         <Pressable onPress={() => setShowPicker('to')} style={styles.dateBtn}>
-          <Calendar size={14} color={PRIMARY} />
-          <Text fontSize={12} marginLeft={4} color="$primary">
-            {toDate ? fmtDate(toDate) : 'To'}
-          </Text>
+          <Calendar size={14} color={colors.primary} />
+          <Text style={styles.dateBtnText}>{toDate ? fmtDate(toDate) : 'To'}</Text>
         </Pressable>
 
-        {(fromDate || toDate) && (
+        {(fromDate || toDate) ? (
           <Pressable onPress={clearDateFilter} hitSlop={8}>
-            <X size={20} color="red" />
+            <X size={20} color={colors.error} />
           </Pressable>
-        )}
-      </XStack>
+        ) : null}
+      </View>
 
       {/* Active date range label */}
-      {fromDate && toDate && (
-        <Text paddingHorizontal="$3" fontSize={13} color="$accent" paddingBottom="$1">
-          {fmtDate(fromDate)} → {fmtDate(toDate)}
-        </Text>
-      )}
+      {fromDate && toDate ? (
+        <Text style={styles.dateRangeLabel}>{fmtDate(fromDate)} → {fmtDate(toDate)}</Text>
+      ) : null}
 
-      <Text paddingHorizontal="$3" paddingBottom="$2" fontSize={18}>
-        Stock entries
-      </Text>
+      <Text style={styles.sectionTitle}>Stock entries</Text>
 
       {error ? (
-        <YStack flex={1} alignItems="center" justifyContent="center" gap="$3" padding="$4">
-          <Text color="$red10" fontSize={14} textAlign="center">
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>
             {(error as { message?: string }).message ?? 'Failed to load entries'}
           </Text>
-          <Button onPress={() => void refetch()} size="$3" backgroundColor="$accent" color="white">
-            Retry
-          </Button>
-        </YStack>
+          <Button onPress={() => void refetch()}>Retry</Button>
+        </View>
+      ) : isLoading && entries.length === 0 ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={colors.accent} />
+        </View>
       ) : (
         <FlatList
           data={filteredEntries}
           keyExtractor={(item) => item.name}
           renderItem={renderItem}
           refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} />}
-          contentContainerStyle={filteredEntries.length === 0 ? styles.emptyContainer : undefined}
-          ListEmptyComponent={
-            <YStack alignItems="center" gap="$2" padding="$4">
-              <Text color="$accent" fontSize={14}>
-                {isLoading ? 'Loading…' : 'No entries available'}
-              </Text>
-            </YStack>
+          contentContainerStyle={
+            filteredEntries.length === 0 ? styles.emptyContainer : styles.listContent
           }
-          ItemSeparatorComponent={() => <YStack style={styles.separator} />}
+          ListEmptyComponent={
+            <View style={styles.emptyView}>
+              <Text style={styles.emptyText}>No entries available.</Text>
+            </View>
+          }
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
           style={styles.list}
         />
       )}
 
-      {showPicker != null && (
+      {showPicker != null ? (
         <DateTimePicker
           value={(showPicker === 'from' ? fromDate : toDate) ?? new Date()}
           mode="date"
@@ -209,33 +213,109 @@ export default function Dashboard() {
             else setToDate(date);
           }}
         />
-      )}
+      ) : null}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F4F4F6' },
-  iconBtn: {
-    padding: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(68,67,62,0.1)',
+  root: { flex: 1, backgroundColor: colors.bg },
+  // temporary drawer
+  drawerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  drawerPanel: {
+    backgroundColor: colors.surface,
+    padding: spacing.xl,
+    borderTopLeftRadius: radii.lg,
+    borderTopRightRadius: radii.lg,
+    gap: spacing.lg,
   },
+  drawerName: { fontSize: 18, fontWeight: '600', color: colors.primary },
+  // header
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+  },
+  menuBtn: {
+    padding: 8,
+    borderRadius: radii.md,
+    backgroundColor: colors.pressed,
+  },
+  greeting: { flex: 1 },
+  greetingText: { fontSize: 22, fontWeight: '600', color: colors.primary },
+  greetingName: { fontSize: 16, fontWeight: 'bold', color: colors.primary },
+  // filter bar
+  filterBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  filterLabel: { ...typography.label, flexShrink: 0 },
+  typePicker: { flex: 1 },
   dateBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
     paddingVertical: 6,
     paddingHorizontal: 8,
-    borderRadius: 8,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: 'rgba(68,67,62,0.25)',
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
-  list: { flex: 1, backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24 },
-  row: {
+  dateBtnText: { fontSize: 12, color: colors.primary },
+  dateRangeLabel: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xs,
+    fontSize: 13,
+    color: colors.accent,
+  },
+  sectionTitle: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    fontSize: 18,
+    color: colors.primary,
+  },
+  // states
+  errorContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
+  errorText: { fontSize: 14, color: colors.error, textAlign: 'center' },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  // list
+  list: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  listContent: { paddingBottom: spacing.xxl },
+  emptyContainer: { flex: 1 },
+  emptyView: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
+  emptyText: { ...typography.hint },
+  // card
+  card: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    padding: spacing.md,
+    backgroundColor: colors.surface,
   },
-  separator: { height: 1, backgroundColor: 'rgba(68,67,62,0.15)' },
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  cardLeft: { flex: 1, gap: 2 },
+  entryType: { fontSize: 13, fontWeight: 'bold', color: colors.primary },
+  entryName: { fontSize: 14, color: colors.primary },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  metaDate: { fontSize: 13, color: colors.primary },
+  metaStatus: { fontSize: 12 },
+  submitted: { color: colors.success },
+  draft: { color: colors.error },
+  amount: { fontSize: 17, fontWeight: 'bold', color: colors.primary },
+  separator: { height: 1, backgroundColor: colors.borderLight },
 });

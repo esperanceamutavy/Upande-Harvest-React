@@ -1,13 +1,27 @@
 import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { Image, KeyboardAvoidingView, Platform, StyleSheet, TouchableOpacity } from 'react-native';
-import { Button, Input, Text, XStack, YStack } from 'tamagui';
+import {
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Eye, EyeOff } from 'lucide-react-native';
 
 import { CLIENT_REGISTRY } from '../../lib/clients';
 import { getClientIdByUrl } from '../../lib/instanceMapper';
 import { STORAGE_KEYS, getStorageItem } from '../../lib/storage';
 import { useLogin } from '../../features/auth/useLogin';
+import { Button } from '../../components/ui/Button';
+import { Field } from '../../components/ui/Field';
+import { Pill } from '../../components/ui/Pill';
+import { colors, radii, spacing } from '../../components/ui/theme';
 
 interface FormValues {
   url: string;
@@ -66,148 +80,159 @@ export default function LoginScreen() {
   });
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <YStack flex={1} justifyContent="center" alignItems="center" paddingHorizontal="$4">
-        <YStack
-          backgroundColor="white"
-          borderRadius="$4"
-          padding="$5"
-          width="100%"
-          maxWidth={450}
-          gap="$4"
-          // Shadow for Android
-          elevation={4}
-          // Shadow for iOS
-          shadowColor="black"
-          shadowOpacity={0.15}
-          shadowRadius={8}
-          shadowOffset={{ width: 0, height: 2 }}
+    <SafeAreaView style={styles.root}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
         >
-          <Text fontSize={26} fontWeight="600" textAlign="center" color="$primary">
-            Upande Harvest
-          </Text>
+          <View style={styles.card}>
+            <Text style={styles.appName}>Upande Harvest</Text>
 
-          {/* URL field + client name badge */}
-          <YStack gap="$1">
-            <Controller
-              control={control}
-              name="url"
-              rules={{ required: 'URL required' }}
-              render={({ field: { value, onChange, onBlur } }) => (
-                <Input
-                  placeholder="Instance URL (e.g. demo.upande.com)"
-                  value={value}
-                  onChangeText={onChange}
-                  onBlur={onBlur}
-                  autoCapitalize="none"
-                  keyboardType="url"
-                  autoCorrect={false}
-                  borderColor={errors.url ? '$red8' : '$borderColor'}
-                />
-              )}
-            />
-            {errors.url ? (
-              <Text color="$red10" fontSize={12}>{errors.url.message}</Text>
-            ) : clientName ? (
-              <Text color="$accent" fontSize={12} fontWeight="500">{clientName}</Text>
-            ) : null}
-          </YStack>
-
-          {/* Email field */}
-          <YStack gap="$1">
-            <Controller
-              control={control}
-              name="email"
-              rules={{ required: 'Email required' }}
-              render={({ field: { value, onChange, onBlur } }) => (
-                <Input
-                  placeholder="Email"
-                  value={value}
-                  onChangeText={onChange}
-                  onBlur={onBlur}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  autoCorrect={false}
-                  borderColor={errors.email ? '$red8' : '$borderColor'}
-                />
-              )}
-            />
-            {errors.email && (
-              <Text color="$red10" fontSize={12}>{errors.email.message}</Text>
-            )}
-          </YStack>
-
-          {/* Password field with show/hide toggle */}
-          <YStack gap="$1">
-            <XStack alignItems="center" gap="$2">
+            <Field label="Server URL" error={errors.url?.message}>
               <Controller
                 control={control}
-                name="password"
-                rules={{ required: 'Password required' }}
+                name="url"
+                rules={{ required: 'URL required' }}
                 render={({ field: { value, onChange, onBlur } }) => (
-                  <Input
-                    flex={1}
-                    placeholder="Password"
+                  <TextInput
+                    style={[styles.input, errors.url && styles.inputError]}
+                    placeholder="Instance URL (e.g. demo.upande.com)"
+                    placeholderTextColor={colors.muted}
                     value={value}
                     onChangeText={onChange}
                     onBlur={onBlur}
-                    secureTextEntry={!passwordVisible}
-                    borderColor={errors.password ? '$red8' : '$borderColor'}
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    autoCorrect={false}
                   />
                 )}
               />
-              <TouchableOpacity
-                onPress={() => setPasswordVisible((v) => !v)}
-                hitSlop={8}
-                style={styles.eyeButton}
-              >
-                {passwordVisible ? <EyeOff size={20} color="#666" /> : <Eye size={20} color="#666" />}
-              </TouchableOpacity>
-            </XStack>
-            {errors.password && (
-              <Text color="$red10" fontSize={12}>{errors.password.message}</Text>
-            )}
-          </YStack>
+              {!errors.url && clientName ? (
+                <Text style={styles.clientBadge}>{clientName}</Text>
+              ) : null}
+            </Field>
 
-          {/* Submit button */}
-          <Button
-            onPress={onSubmit}
-            disabled={isLoading}
-            backgroundColor="$accent"
-            color="white"
-            fontWeight="600"
-            fontSize={16}
-            pressStyle={{ opacity: 0.8 }}
-          >
-            {isLoading ? 'Please wait...' : 'Log In'}
-          </Button>
+            <Field label="Email" error={errors.email?.message}>
+              <Controller
+                control={control}
+                name="email"
+                rules={{ required: 'Email required' }}
+                render={({ field: { value, onChange, onBlur } }) => (
+                  <TextInput
+                    style={[styles.input, errors.email && styles.inputError]}
+                    placeholder="Email"
+                    placeholderTextColor={colors.muted}
+                    value={value}
+                    onChangeText={onChange}
+                    onBlur={onBlur}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    autoComplete="email"
+                    autoCorrect={false}
+                  />
+                )}
+              />
+            </Field>
 
-          {/* Login error */}
-          {error ? (
-            <Text color="$red10" fontSize={13} textAlign="center" lineHeight={18}>
-              {error}
-            </Text>
-          ) : null}
+            <Field label="Password" error={errors.password?.message}>
+              <View style={styles.passwordRow}>
+                <Controller
+                  control={control}
+                  name="password"
+                  rules={{ required: 'Password required' }}
+                  render={({ field: { value, onChange, onBlur } }) => (
+                    <TextInput
+                      style={[styles.input, styles.passwordInput, errors.password && styles.inputError]}
+                      placeholder="Password"
+                      placeholderTextColor={colors.muted}
+                      value={value}
+                      onChangeText={onChange}
+                      onBlur={onBlur}
+                      secureTextEntry={!passwordVisible}
+                    />
+                  )}
+                />
+                <Pressable
+                  onPress={() => setPasswordVisible((v) => !v)}
+                  hitSlop={8}
+                  style={styles.eyeBtn}
+                >
+                  {passwordVisible
+                    ? <EyeOff size={20} color="#666" />
+                    : <Eye size={20} color="#666" />}
+                </Pressable>
+              </View>
+            </Field>
 
-          {/* Powered-by logo */}
-          <XStack justifyContent="center" alignItems="center" gap="$2" marginTop="$1">
-            <Text fontSize={13} color="$gray10">Powered by:</Text>
-            <Image
-              source={require('../../../assets/images/upande_logo.png')}
-              style={styles.logo}
-            />
-          </XStack>
-        </YStack>
-      </YStack>
-    </KeyboardAvoidingView>
+            {error ? <Pill variant="error">{error}</Pill> : null}
+
+            <Button onPress={onSubmit} disabled={isLoading}>
+              {isLoading ? 'Please wait...' : 'Log In'}
+            </Button>
+
+            <View style={styles.footer}>
+              <Text style={styles.footerText}>Powered by:</Text>
+              <Image
+                source={require('../../../assets/images/upande_logo.png')}
+                style={styles.logo}
+              />
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
+  scroll: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.lg },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    padding: spacing.xl,
+    width: '100%',
+    maxWidth: 450,
+    gap: spacing.lg,
+    elevation: 4,
+    shadowColor: 'black',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  appName: {
+    fontSize: 26,
+    fontWeight: '600',
+    textAlign: 'center',
+    color: colors.primary,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  inputError: { borderColor: colors.error },
+  clientBadge: { fontSize: 12, fontWeight: '500', color: colors.accent, marginTop: 2 },
+  passwordRow: { flexDirection: 'row', alignItems: 'center' },
+  passwordInput: { flex: 1 },
+  eyeBtn: { padding: 4, marginLeft: spacing.sm },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  footerText: { fontSize: 13, color: '#888' },
   logo: { height: 28, width: 28, resizeMode: 'contain' },
-  eyeButton: { padding: 4 },
 });
