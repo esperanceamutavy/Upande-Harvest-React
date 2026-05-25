@@ -4,21 +4,24 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Adapt, Button, Select, Sheet, Text, XStack, YStack } from 'tamagui';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, ChevronDown } from 'lucide-react-native';
 
 import { useFarms } from '../../features/station/useFarms';
 import { useWarehouses } from '../../features/station/useWarehouses';
 import { useStationStore } from '../../stores/station';
 import { setStorageItem, STORAGE_KEYS } from '../../lib/storage';
 import { haptics } from '../../lib/haptics';
-
-const PRIMARY = '#44433e';
+import { AppBar } from '../../components/ui/AppBar';
+import { Button } from '../../components/ui/Button';
+import { Field } from '../../components/ui/Field';
+import { Picker } from '../../components/ui/Picker';
+import { Pill } from '../../components/ui/Pill';
+import { colors, radii, spacing } from '../../components/ui/theme';
 
 export default function ConfigureStation() {
   const router = useRouter();
@@ -61,6 +64,11 @@ export default function ConfigureStation() {
     if (!q) return filteredWarehouses;
     return filteredWarehouses.filter((w) => w.name.toLowerCase().includes(q));
   }, [warehouseInput, filteredWarehouses]);
+
+  const farmItems = useMemo(
+    () => farms.map((f) => ({ label: f.name, value: f.name })),
+    [farms],
+  );
 
   function handleFarmChange(farm: string) {
     setSelectedFarm(farm);
@@ -112,67 +120,31 @@ export default function ConfigureStation() {
 
   return (
     <SafeAreaView style={styles.root}>
-      {/* App bar */}
-      <XStack
-        paddingHorizontal="$3"
-        paddingVertical="$2"
-        alignItems="center"
-        gap="$2"
-        backgroundColor={PRIMARY}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
-          <ArrowLeft size={24} color="white" />
-        </Pressable>
-        <Text fontSize={18} fontWeight="bold" color="white" flex={1}>
-          Configure Station
-        </Text>
-      </XStack>
+      <AppBar title="Configure Station" onBack={() => router.back()} />
 
       {isLoading ? (
-        <YStack flex={1} alignItems="center" justifyContent="center">
-          <ActivityIndicator color={PRIMARY} size="large" />
-        </YStack>
+        <View style={styles.centered}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </View>
       ) : (
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
-          <YStack gap="$4">
-            {/* Farm Select */}
-            <YStack gap="$2">
-              <Text fontWeight="600" fontSize={14} color="$primary">Farm</Text>
-              <Select value={selectedFarm} onValueChange={handleFarmChange}>
-                <Select.Trigger iconAfter={<ChevronDown size={14} color={PRIMARY} />}>
-                  <Select.Value placeholder="Select a farm…" />
-                </Select.Trigger>
-
-                <Adapt when="sm" platform="touch">
-                  <Sheet dismissOnSnapToBottom snapPoints={[40]}>
-                    <Sheet.Frame padding="$4">
-                      <Sheet.ScrollView>
-                        <Adapt.Contents />
-                      </Sheet.ScrollView>
-                    </Sheet.Frame>
-                    <Sheet.Overlay />
-                  </Sheet>
-                </Adapt>
-
-                <Select.Content>
-                  <Select.Viewport>
-                    {farms.map((farm, i) => (
-                      <Select.Item key={farm.name} index={i} value={farm.name}>
-                        <Select.ItemText>{farm.name}</Select.ItemText>
-                      </Select.Item>
-                    ))}
-                  </Select.Viewport>
-                </Select.Content>
-              </Select>
-            </YStack>
+          <View style={styles.form}>
+            {/* Farm */}
+            <Field label="Farm">
+              <Picker
+                value={selectedFarm}
+                onValueChange={handleFarmChange}
+                placeholder="Select a farm…"
+                items={farmItems}
+              />
+            </Field>
 
             {/* Warehouse typeahead */}
-            <YStack gap="$2">
-              <Text fontWeight="600" fontSize={14} color="$primary">Station (Warehouse)</Text>
+            <Field label="Station (Warehouse)">
               <View>
                 <TextInput
                   style={[styles.input, !selectedFarm && styles.inputDisabled]}
@@ -186,10 +158,10 @@ export default function ConfigureStation() {
                   onFocus={() => setShowSuggestions(true)}
                   onBlur={handleWarehouseBlur}
                   placeholder={selectedFarm ? 'Search station…' : 'Select a farm first'}
-                  placeholderTextColor="rgba(68,67,62,0.4)"
+                  placeholderTextColor={colors.muted}
                   editable={!!selectedFarm}
                 />
-                {showSuggestions && suggestions.length > 0 && (
+                {showSuggestions && suggestions.length > 0 ? (
                   <View style={styles.suggestions}>
                     {suggestions.slice(0, 8).map((w) => (
                       <Pressable
@@ -200,37 +172,24 @@ export default function ConfigureStation() {
                           pressed && styles.suggestionPressed,
                         ]}
                       >
-                        <Text fontSize={14} color="$primary">{w.name}</Text>
+                        <Text style={styles.suggestionText}>{w.name}</Text>
                       </Pressable>
                     ))}
                   </View>
-                )}
+                ) : null}
               </View>
-            </YStack>
+            </Field>
 
             {/* Validation error */}
-            {!!validationError && (
-              <Text color="$red10" fontSize={13}>{validationError}</Text>
-            )}
+            {validationError ? <Pill variant="error">{validationError}</Pill> : null}
 
             {/* Success message */}
-            {savedMsg && (
-              <Text color="$success" fontSize={13} fontWeight="600">
-                Station saved
-              </Text>
-            )}
+            {savedMsg ? <Pill variant="success">Station saved</Pill> : null}
 
-            <Button
-              onPress={() => void handleSave()}
-              disabled={isSaving}
-              opacity={isSaving ? 0.6 : 1}
-              backgroundColor={PRIMARY}
-              color="white"
-              size="$4"
-            >
+            <Button onPress={() => void handleSave()} disabled={isSaving}>
               {isSaving ? 'Saving...' : 'Save'}
             </Button>
-          </YStack>
+          </View>
         </ScrollView>
       )}
     </SafeAreaView>
@@ -238,32 +197,31 @@ export default function ConfigureStation() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F4F4F6' },
-  backBtn: { padding: 4 },
+  root: { flex: 1, backgroundColor: colors.bg },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { flex: 1 },
-  content: { padding: 16, paddingTop: 24 },
+  content: { padding: spacing.lg, paddingTop: spacing.xl },
+  form: { gap: spacing.lg },
   input: {
     borderWidth: 1,
-    borderColor: 'rgba(68,67,62,0.25)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
     paddingVertical: 10,
     fontSize: 14,
-    color: PRIMARY,
-    backgroundColor: 'white',
+    color: colors.primary,
+    backgroundColor: colors.surface,
   },
-  inputDisabled: {
-    backgroundColor: 'rgba(68,67,62,0.05)',
-  },
+  inputDisabled: { backgroundColor: colors.pressed },
   suggestions: {
     position: 'absolute',
     top: '100%',
     left: 0,
     right: 0,
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(68,67,62,0.2)',
-    borderRadius: 8,
+    borderColor: colors.border,
+    borderRadius: radii.md,
     zIndex: 100,
     elevation: 4,
     shadowColor: 'black',
@@ -272,10 +230,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
   },
   suggestion: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(68,67,62,0.08)',
+    borderBottomColor: colors.borderLight,
   },
-  suggestionPressed: { backgroundColor: 'rgba(68,67,62,0.06)' },
+  suggestionPressed: { backgroundColor: colors.pressed },
+  suggestionText: { fontSize: 14, color: colors.primary },
 });
