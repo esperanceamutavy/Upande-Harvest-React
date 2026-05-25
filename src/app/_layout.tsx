@@ -4,7 +4,8 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
-import { PortalProvider, TamaguiProvider } from 'tamagui';
+import { PortalProvider as GorhomPortalProvider } from '@tamagui/portal';
+import { TamaguiProvider } from 'tamagui';
 
 import { tamaguiConfig } from '../../tamagui.config';
 import '../lib/sentry'; // side-effect: initialises Sentry once at module load
@@ -100,11 +101,11 @@ export default function RootLayout() {
 
   return (
     <TamaguiProvider config={tamaguiConfig}>
-      <PortalProvider shouldAddRootHost>
+      <GorhomPortalProvider>
         <QueryClientProvider client={queryClient}>
           <RootLayoutNav />
         </QueryClientProvider>
-      </PortalProvider>
+      </GorhomPortalProvider>
     </TamaguiProvider>
   );
 }
