@@ -1,6 +1,5 @@
 import { BottomSheetModalProvider } from '@expo/ui/community/bottom-sheet';
 import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
-import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
@@ -89,13 +88,6 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
-    Inter: require('@tamagui/font-inter/otf/Inter-Medium.otf'),
-    InterBold: require('@tamagui/font-inter/otf/Inter-Bold.otf'),
-  });
-
-  if (!fontsLoaded) return null;
-
   return (
     <QueryClientProvider client={queryClient}>
       <BottomSheetModalProvider>

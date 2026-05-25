@@ -1,10 +1,9 @@
-import { StyleSheet, View } from 'react-native';
-import { Text } from 'tamagui';
+import { StyleSheet, Text, View } from 'react-native';
 
 export default function ReceivingReport() {
   return (
     <View style={styles.container}>
-      <Text fontSize={16}>Receiving Report — coming in Phase 5</Text>
+      <Text style={{ fontSize: 16 }}>Receiving Report — coming in Phase 5</Text>
     </View>
   );
 }

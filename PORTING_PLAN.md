@@ -81,12 +81,15 @@
 
 ## Phase 4 — Kikwetu workflows (in order)
 
-### 4.1 🟨 Harvesting — template-setter (every later workflow copies its pattern)
+### 4.1 ✅ Harvesting — template-setter (every later workflow copies its pattern)
 Form: variety, section, harvester (auto from section), stem length, qty. Camera scan for bucket QR. Validate bucket via `GET /api/resource/Bucket QR Code?filters=...`. Submit via `POST /api/resource/Stock Entry`. Audio: submit.mp3 success, error.mp3 fail. Haptics: heavy on warning. Day-of-week symbol (`@!?#+*/`).
 
 **Acceptance:** A harvester can complete a real harvesting entry on the Kikwetu staging instance using only the RN app.
 
-### 4.2 🟨 Receiving — introduces HID scanner support
+### Phase 2.5 ✅ Tamagui→@expo/ui swap (completed)
+After Phase 4.2 device testing revealed unresolvable Tamagui v2 + React 19 issues (broken Sheets, animation driver failures, babel compile errors), the entire app was migrated to @expo/ui/community/bottom-sheet + a custom design system. All screens (Login, Dashboard, AppDrawer, Configure, Harvesting, Receiving) and all stub screens were rewritten. New design system lives in `src/components/ui/` (theme.ts, AppBar, Button, Field, Picker, Pill).
+
+### 4.2 ✅ Receiving — introduces HID scanner support
 Camera scan OR HID scan (hidden focused TextInput watching for JSON ending in `}`). Validate bucket "In Use" state. Submit via `POST /api/method/createReceivingStockEntry`.
 
 **Acceptance:** Receiving works with both phone camera AND the HID hardware scanner.

@@ -1,10 +1,9 @@
-import { StyleSheet, View } from 'react-native';
-import { Text } from 'tamagui';
+import { StyleSheet, Text, View } from 'react-native';
 
 export default function GradingTest() {
   return (
     <View style={styles.container}>
-      <Text fontSize={16}>Grading Test — coming in Phase 4</Text>
+      <Text style={{ fontSize: 16 }}>Grading Test — coming in Phase 4</Text>
     </View>
   );
 }

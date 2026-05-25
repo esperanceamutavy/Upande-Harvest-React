@@ -1,10 +1,9 @@
-import { StyleSheet, View } from 'react-native';
-import { Text } from 'tamagui';
+import { StyleSheet, Text, View } from 'react-native';
 
 export default function ErpDesk() {
   return (
     <View style={styles.container}>
-      <Text fontSize={16}>ERP Desk — coming in Phase 6</Text>
+      <Text style={{ fontSize: 16 }}>ERP Desk — coming in Phase 6</Text>
     </View>
   );
 }

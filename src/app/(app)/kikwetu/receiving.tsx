@@ -4,13 +4,13 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, XStack, YStack } from 'tamagui';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, MoreVertical, QrCode } from 'lucide-react-native';
+import { MoreVertical, QrCode } from 'lucide-react-native';
 
 import { useStation } from '../../../features/station/useStation';
 import { useBucketCheck } from '../../../features/stock/useBucketCheck';
@@ -19,17 +19,14 @@ import { useGreenhouseByBucketId } from '../../../features/stock/useGreenhouseBy
 import { playSubmit, playError } from '../../../lib/audio';
 import { extractFrappeError } from '../../../lib/api';
 import { BarcodeScannerOverlay } from '../../../features/scanning/BarcodeScannerOverlay';
+import { AppBar } from '../../../components/ui/AppBar';
+import { Field } from '../../../components/ui/Field';
+import { Pill } from '../../../components/ui/Pill';
+import { colors, radii, spacing } from '../../../components/ui/theme';
 
-const PRIMARY = '#44433e';
-const ACCENT = '#699dcd';
+const ACCENT = colors.accent;
 
 type FeedbackMsg = { type: 'success' | 'warning' | 'error'; text: string };
-
-const FEEDBACK_COLORS = {
-  success: '#48773E',
-  warning: '#c07020',
-  error: '#c0392b',
-};
 
 function isValidJson(text: string): boolean {
   try {
@@ -170,60 +167,41 @@ export default function ReceivingScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
-      {/* App bar */}
-      <XStack
-        paddingHorizontal="$3"
-        paddingVertical="$2"
-        alignItems="center"
-        gap="$2"
-        backgroundColor={PRIMARY}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8} style={styles.iconBtn}>
-          <ArrowLeft size={24} color="white" />
-        </Pressable>
-        <Text fontSize={18} fontWeight="bold" color="white" flex={1}>
-          Receiving Entry
-        </Text>
-        <Pressable
-          hitSlop={8}
-          style={styles.iconBtn}
-          onPress={() =>
-            Alert.alert('Receiving Report', 'Coming in Phase 5.', [{ text: 'OK' }])
-          }
-        >
-          <MoreVertical size={22} color="white" />
-        </Pressable>
-      </XStack>
+      <AppBar
+        title="Receiving Entry"
+        onBack={() => router.back()}
+        rightAction={{
+          icon: <MoreVertical size={22} color="white" />,
+          onPress: () => Alert.alert('Receiving Report', 'Coming in Phase 5.', [{ text: 'OK' }]),
+        }}
+      />
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        <YStack gap="$4">
+        <View style={styles.form}>
           {/* Toggle: show last harvest greenhouse — port of fetchLastGreenHouseDetails */}
           <Pressable
             onPress={() => setShowLastHarvest((v) => !v)}
             style={styles.toggleRow}
           >
             <View style={[styles.toggleBox, showLastHarvest && styles.toggleBoxActive]}>
-              {showLastHarvest && (
-                <Text color="white" fontSize={14} fontWeight="700">✓</Text>
-              )}
+              {showLastHarvest ? (
+                <Text style={styles.toggleCheck}>✓</Text>
+              ) : null}
             </View>
-            <YStack flex={1} gap="$1">
-              <Text fontSize={14} fontWeight="600" color="$primary">
-                Show last harvest greenhouse
-              </Text>
-              {showLastHarvest && (
-                <Text fontSize={12} color={ACCENT}>(Scan QR to fetch)</Text>
-              )}
-            </YStack>
+            <View style={styles.toggleLabels}>
+              <Text style={styles.toggleLabel}>Show last harvest greenhouse</Text>
+              {showLastHarvest ? (
+                <Text style={styles.toggleHint}>(Scan QR to fetch)</Text>
+              ) : null}
+            </View>
           </Pressable>
 
           {/* Bucket ID field — HID-aware: onChangeText fires on each character; JSON-terminator triggers processing */}
-          <YStack gap="$1">
-            <Text fontWeight="600" fontSize={14} color="$primary">Bucket ID</Text>
+          <Field label="Bucket ID">
             <View style={styles.bucketRow}>
               <TextInput
                 ref={textInputRef}
@@ -233,7 +211,7 @@ export default function ReceivingScreen() {
                 autoFocus
                 autoCapitalize="characters"
                 placeholder={isProcessing ? 'Processing…' : 'Scan bucket QR code…'}
-                placeholderTextColor="rgba(68,67,62,0.4)"
+                placeholderTextColor={colors.muted}
                 editable={!isProcessing}
               />
               <Pressable
@@ -245,45 +223,29 @@ export default function ReceivingScreen() {
                 <QrCode size={22} color={ACCENT} />
               </Pressable>
             </View>
-          </YStack>
+          </Field>
 
           {/* Last greenhouse pill — persists between scans */}
-          {lastGreenhouseShown !== null && (
-            <View style={styles.greenhousePill}>
-              <Text fontSize={13} color="rgba(68,67,62,0.7)">
-                Last greenhouse: {lastGreenhouseShown}
-              </Text>
-            </View>
-          )}
+          {lastGreenhouseShown !== null ? (
+            <Pill variant="neutral">Last greenhouse: {lastGreenhouseShown}</Pill>
+          ) : null}
 
           {/* Feedback message */}
-          {feedback && (
-            <View style={[styles.feedback, { backgroundColor: FEEDBACK_COLORS[feedback.type] + '18' }]}>
-              <Text
-                fontSize={13}
-                fontWeight="600"
-                color={FEEDBACK_COLORS[feedback.type] as string}
-              >
-                {feedback.text}
-              </Text>
-            </View>
-          )}
+          {feedback ? <Pill variant={feedback.type}>{feedback.text}</Pill> : null}
 
           {/* Hint */}
-          <Text fontSize={13} color="rgba(68,67,62,0.5)" textAlign="center">
-            Scan a bucket QR code to record receipt
-          </Text>
+          <Text style={styles.hint}>Scan a bucket QR code to record receipt</Text>
 
           {/* Station footer */}
-          <XStack alignItems="center" justifyContent="space-between" paddingTop="$1">
-            <Text fontSize={13} color="$primary" flex={1}>
+          <View style={styles.stationFooter}>
+            <Text style={styles.stationText} numberOfLines={1}>
               {station.farmName} Farm · {station.warehouseName}
             </Text>
             <Pressable onPress={() => router.push('/configure')} hitSlop={8}>
-              <Text fontSize={13} color={ACCENT} fontWeight="600">Change →</Text>
+              <Text style={styles.changeLink}>Change →</Text>
             </Pressable>
-          </XStack>
-        </YStack>
+          </View>
+        </View>
       </ScrollView>
 
       <BarcodeScannerOverlay
@@ -296,15 +258,16 @@ export default function ReceivingScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F4F4F6' },
-  iconBtn: { padding: 4 },
+  root: { flex: 1, backgroundColor: colors.bg },
   scroll: { flex: 1 },
-  content: { padding: 16, paddingBottom: 32 },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  form: { gap: spacing.md },
+  // toggle
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 4,
+    gap: spacing.md,
+    paddingVertical: spacing.xs,
   },
   toggleBox: {
     width: 24,
@@ -320,37 +283,38 @@ const styles = StyleSheet.create({
     backgroundColor: ACCENT,
     borderColor: ACCENT,
   },
+  toggleCheck: { color: 'white', fontSize: 14, fontWeight: '700' },
+  toggleLabels: { flex: 1, gap: spacing.xs },
+  toggleLabel: { fontSize: 14, fontWeight: '600', color: colors.primary },
+  toggleHint: { fontSize: 12, color: ACCENT },
+  // bucket input
   input: {
     borderWidth: 1,
-    borderColor: 'rgba(68,67,62,0.25)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
     paddingVertical: 10,
     fontSize: 14,
-    color: PRIMARY,
-    backgroundColor: 'white',
+    color: colors.primary,
+    backgroundColor: colors.surface,
   },
-  bucketRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+  bucketRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   bucketInput: { flex: 1 },
   qrBtn: {
     padding: 10,
     borderWidth: 1,
     borderColor: 'rgba(105,157,205,0.4)',
-    borderRadius: 8,
-    backgroundColor: 'white',
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
   },
-  greenhousePill: {
-    backgroundColor: 'rgba(68,67,62,0.06)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  // footer
+  hint: { fontSize: 13, color: colors.muted, textAlign: 'center' },
+  stationFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: spacing.xs,
   },
-  feedback: {
-    padding: 12,
-    borderRadius: 8,
-  },
+  stationText: { fontSize: 13, color: colors.primary, flex: 1 },
+  changeLink: { fontSize: 13, color: ACCENT, fontWeight: '600' },
 });
