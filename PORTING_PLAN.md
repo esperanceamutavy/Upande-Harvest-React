@@ -86,7 +86,7 @@ Form: variety, section, harvester (auto from section), stem length, qty. Camera 
 
 **Acceptance:** A harvester can complete a real harvesting entry on the Kikwetu staging instance using only the RN app.
 
-### 4.2 ⬜ Receiving — introduces HID scanner support
+### 4.2 🟨 Receiving — introduces HID scanner support
 Camera scan OR HID scan (hidden focused TextInput watching for JSON ending in `}`). Validate bucket "In Use" state. Submit via `POST /api/method/createReceivingStockEntry`.
 
 **Acceptance:** Receiving works with both phone camera AND the HID hardware scanner.
