@@ -61,5 +61,9 @@
     "web": "expo start --web",
     "lint": "expo lint"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "@tamagui/portal": "2.0.0",
+    "@tamagui/core": "2.0.0"
+  }
 }
