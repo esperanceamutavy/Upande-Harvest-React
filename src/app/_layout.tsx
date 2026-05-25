@@ -4,9 +4,6 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
-import { TamaguiProvider } from 'tamagui';
-
-import { tamaguiConfig } from '../../tamagui.config';
 import '../lib/sentry'; // side-effect: initialises Sentry once at module load
 import { initAudio } from '../lib/audio';
 import { getSecureItem, getStorageItem, SECURE_KEYS, STORAGE_KEYS } from '../lib/storage';
@@ -99,10 +96,8 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <TamaguiProvider config={tamaguiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <RootLayoutNav />
-      </QueryClientProvider>
-    </TamaguiProvider>
+    <QueryClientProvider client={queryClient}>
+      <RootLayoutNav />
+    </QueryClientProvider>
   );
 }
