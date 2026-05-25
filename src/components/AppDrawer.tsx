@@ -1,33 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
   Dimensions,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
-import { Button, Sheet, Text, XStack, YStack } from 'tamagui';
 import { useRouter } from 'expo-router';
 import {
-  Scissors,
-  Home,
-  SlidersHorizontal,
-  Package,
-  Truck,
-  Trash2,
+  Box,
+  Hexagon,
   LogOut,
-  Settings,
   Monitor,
+  PackagePlus,
+  Scissors,
+  Settings,
+  Trash2,
+  Truck,
   X,
+  XCircle,
 } from 'lucide-react-native';
 
 import { useAuthStore } from '../stores/auth';
-import { useStationStore } from '../stores/station';
 import { useLogout } from '../features/auth/useLogout';
+import { useStation } from '../features/station/useStation';
+import { colors, radii, spacing } from './ui/theme';
 
-const PRIMARY = '#44433e';
-const DRAWER_WIDTH = Math.min(Dimensions.get('window').width * 0.8, 320);
+const DRAWER_WIDTH = Math.min(Dimensions.get('window').width * 0.75, 320);
 
 interface MenuItem {
   label: string;
@@ -36,89 +39,103 @@ interface MenuItem {
 }
 
 const KIKWETU_ITEMS: MenuItem[] = [
-  { label: 'Harvesting',     icon: <Scissors size={20} color={PRIMARY} />,         route: '/kikwetu/harvesting' },
-  { label: 'Receiving',      icon: <Home size={20} color={PRIMARY} />,              route: '/kikwetu/receiving' },
-  { label: 'Rejects',        icon: <SlidersHorizontal size={20} color={PRIMARY} />, route: '/kikwetu/rejects' },
-  { label: 'Grading',        icon: <SlidersHorizontal size={20} color={PRIMARY} />, route: '/kikwetu/grading' },
-  { label: 'Packing',        icon: <Package size={20} color={PRIMARY} />,           route: '/kikwetu/packing' },
-  { label: 'Dispatch',       icon: <Truck size={20} color={PRIMARY} />,             route: '/kikwetu/dispatch' },
-  { label: 'Discards',       icon: <Trash2 size={20} color={PRIMARY} />,            route: '/kikwetu/discards' },
+  { label: 'Harvesting', icon: <Scissors size={20} color={colors.primary} />, route: '/kikwetu/harvesting' },
+  { label: 'Receiving',  icon: <PackagePlus size={20} color={colors.primary} />, route: '/kikwetu/receiving' },
+  { label: 'Grading',   icon: <Hexagon size={20} color={colors.primary} />, route: '/kikwetu/grading' },
+  { label: 'Packing',   icon: <Box size={20} color={colors.primary} />, route: '/kikwetu/packing' },
+  { label: 'Dispatch',  icon: <Truck size={20} color={colors.primary} />, route: '/kikwetu/dispatch' },
+  { label: 'Discards',  icon: <Trash2 size={20} color={colors.primary} />, route: '/kikwetu/discards' },
+  { label: 'Rejects',   icon: <XCircle size={20} color={colors.primary} />, route: '/kikwetu/rejects' },
 ];
 
 const UTILITY_ITEMS: MenuItem[] = [
-  { label: 'Configure Farm', icon: <Settings size={20} color={PRIMARY} />, route: '/configure' },
-  { label: 'View ERP Desk',  icon: <Monitor size={20} color={PRIMARY} />, route: '/erp-desk' },
+  { label: 'Configure Farm', icon: <Settings size={20} color={colors.primary} />, route: '/configure' },
+  { label: 'View ERP Desk',  icon: <Monitor size={20} color={colors.primary} />, route: '/erp-desk' },
 ];
 
-interface Props {
+interface AppDrawerProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function AppDrawer({ isOpen, onClose }: Props) {
+export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
   const router = useRouter();
   const fullName = useAuthStore((s) => s.fullName);
-  const station = useStationStore((s) => s.station);
+  const email = useAuthStore((s) => s.email);
+  const station = useStation();
   const { logout } = useLogout();
-  const [logoutSheetOpen, setLogoutSheetOpen] = useState(false);
 
+  const [modalVisible, setModalVisible] = useState(false);
   const translateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
-  const overlayOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.parallel([
+    if (isOpen) {
+      setModalVisible(true);
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        damping: 20,
+        stiffness: 200,
+      }).start();
+    } else {
       Animated.timing(translateX, {
-        toValue: isOpen ? 0 : -DRAWER_WIDTH,
-        duration: 250,
+        toValue: -DRAWER_WIDTH,
+        duration: 200,
         useNativeDriver: true,
-      }),
-      Animated.timing(overlayOpacity, {
-        toValue: isOpen ? 0.5 : 0,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-    ]).start();
+      }).start(() => setModalVisible(false));
+    }
   }, [isOpen]);
 
   function navigate(route: string) {
     onClose();
-    // TODO: type MenuItem.route as Href once Expo Router types stabilize
     router.push(route as never);
+  }
+
+  function confirmLogout() {
+    Alert.alert('Logout', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: () => { void logout(); onClose(); },
+      },
+    ]);
   }
 
   const initial = fullName && fullName.length > 0 ? fullName[0].toUpperCase() : 'U';
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents={isOpen ? 'box-none' : 'none'}>
-      {/* Dim overlay */}
-      <Animated.View
-        style={[StyleSheet.absoluteFill, styles.overlay, { opacity: overlayOpacity }]}
-        pointerEvents={isOpen ? 'auto' : 'none'}
-      >
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-      </Animated.View>
+    <Modal
+      visible={modalVisible}
+      transparent
+      animationType="none"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      {/* Dim overlay — tap to close */}
+      <Pressable style={styles.overlay} onPress={onClose} />
 
       {/* Drawer panel */}
       <Animated.View style={[styles.panel, { transform: [{ translateX }] }]}>
         {/* Header */}
         <View style={styles.header}>
-          <XStack justifyContent="space-between" alignItems="flex-start">
+          <View style={styles.headerTop}>
             <View style={styles.avatar}>
-              <Text fontSize={22} fontWeight="bold" color="white">{initial}</Text>
+              <Text style={styles.avatarText}>{initial}</Text>
             </View>
             <Pressable onPress={onClose} hitSlop={8}>
               <X size={20} color="rgba(255,255,255,0.7)" />
             </Pressable>
-          </XStack>
-          <Text fontSize={18} fontWeight="bold" color="white" marginTop="$3">
-            {fullName || 'User'}
-          </Text>
-          <Text fontSize={13} color="rgba(255,255,255,0.7)">
-            {station?.farmName ?? 'No Farm Selected'}
-          </Text>
-          <Text fontSize={13} color="rgba(255,255,255,0.7)">
-            {station?.warehouseName ?? 'No Station Selected'}
-          </Text>
+          </View>
+          <Text style={styles.fullName}>{fullName || 'User'}</Text>
+          {email ? <Text style={styles.emailText}>{email}</Text> : null}
+          <View style={styles.stationCard}>
+            <Text style={styles.stationText}>
+              {station
+                ? `${station.farmName} Farm · ${station.warehouseName}`
+                : 'No station configured'}
+            </Text>
+          </View>
         </View>
 
         {/* Menu items */}
@@ -130,9 +147,7 @@ export function AppDrawer({ isOpen, onClose }: Props) {
               style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
             >
               {item.icon}
-              <Text fontSize={15} fontWeight="600" color="$primary" marginLeft="$3">
-                {item.label}
-              </Text>
+              <Text style={styles.menuLabel}>{item.label}</Text>
             </Pressable>
           ))}
 
@@ -145,71 +160,30 @@ export function AppDrawer({ isOpen, onClose }: Props) {
               style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
             >
               {item.icon}
-              <Text fontSize={15} fontWeight="600" color="$primary" marginLeft="$3">
-                {item.label}
-              </Text>
+              <Text style={styles.menuLabel}>{item.label}</Text>
             </Pressable>
           ))}
         </ScrollView>
 
-        {/* Footer: logout + version */}
+        {/* Footer: logout */}
         <View style={styles.footer}>
           <Pressable
-            onPress={() => setLogoutSheetOpen(true)}
+            onPress={confirmLogout}
             style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
           >
-            <LogOut size={20} color="red" />
-            <Text fontSize={15} fontWeight="600" color="red" marginLeft="$3">Logout</Text>
+            <LogOut size={20} color={colors.error} />
+            <Text style={[styles.menuLabel, styles.logoutLabel]}>Logout</Text>
           </Pressable>
         </View>
       </Animated.View>
-
-      {/* Logout confirmation sheet */}
-      <Sheet
-        open={logoutSheetOpen}
-        onOpenChange={setLogoutSheetOpen}
-        dismissOnSnapToBottom
-        snapPoints={[30]}
-        modal
-      >
-        <Sheet.Overlay />
-        <Sheet.Frame padding="$4">
-          <YStack alignItems="center" gap="$3">
-            <LogOut size={40} color="red" />
-            <Text fontSize={17} fontWeight="500" textAlign="center">
-              Are you sure you want to logout?
-            </Text>
-            <XStack gap="$3" width="100%">
-              <Button
-                flex={1}
-                variant="outlined"
-                onPress={() => setLogoutSheetOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                flex={1}
-                backgroundColor="$red9"
-                color="white"
-                onPress={() => {
-                  setLogoutSheetOpen(false);
-                  onClose();
-                  void logout();
-                }}
-              >
-                Logout
-              </Button>
-            </XStack>
-          </YStack>
-        </Sheet.Frame>
-      </Sheet>
-    </View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: {
-    backgroundColor: 'black',
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0,0,0,0.4)',
   },
   panel: {
     position: 'absolute',
@@ -217,7 +191,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     width: DRAWER_WIDTH,
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     elevation: 8,
     shadowColor: 'black',
     shadowOpacity: 0.3,
@@ -225,28 +199,52 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 2, height: 0 },
   },
   header: {
-    backgroundColor: PRIMARY,
-    paddingHorizontal: 16,
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.lg,
     paddingTop: 48,
-    paddingBottom: 20,
-    borderBottomRightRadius: 16,
+    paddingBottom: spacing.lg,
+    borderBottomRightRadius: radii.lg,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
   avatar: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#699dcd',
+    backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scroll: { flex: 1, paddingVertical: 8 },
+  avatarText: { fontSize: 22, fontWeight: 'bold', color: 'white' },
+  fullName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+    marginTop: spacing.md,
+  },
+  emailText: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
+  stationCard: {
+    marginTop: spacing.sm,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  stationText: { fontSize: 12, color: 'rgba(255,255,255,0.85)' },
+  scroll: { flex: 1, paddingVertical: spacing.xs },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 14,
+    gap: spacing.md,
   },
-  menuItemPressed: { backgroundColor: 'rgba(68,67,62,0.06)' },
-  divider: { height: 1, backgroundColor: 'rgba(68,67,62,0.12)', marginVertical: 4 },
-  footer: { borderTopWidth: 1, borderTopColor: 'rgba(68,67,62,0.12)' },
+  menuItemPressed: { backgroundColor: colors.pressed },
+  menuLabel: { fontSize: 15, fontWeight: '600', color: colors.primary },
+  divider: { height: 1, backgroundColor: colors.borderLight, marginVertical: spacing.xs },
+  footer: { borderTopWidth: 1, borderTopColor: colors.borderLight },
+  logoutLabel: { color: colors.error },
 });

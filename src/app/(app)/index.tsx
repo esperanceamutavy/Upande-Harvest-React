@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Modal,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -17,9 +16,7 @@ import { Calendar, Menu, X } from 'lucide-react-native';
 import { useAuthStore } from '../../stores/auth';
 import { useStockEntries } from '../../features/stock/useStockEntries';
 import { useStockEntryTypes } from '../../features/stock/useStockEntryTypes';
-import { useLogout } from '../../features/auth/useLogout';
-// TODO (commit 3): restore when AppDrawer is rewritten without Tamagui
-// import { AppDrawer } from '../../components/AppDrawer';
+import { AppDrawer } from '../../components/AppDrawer';
 import type { StockEntry } from '../../types/stock';
 import { Button } from '../../components/ui/Button';
 import { Picker } from '../../components/ui/Picker';
@@ -42,7 +39,6 @@ function fmtDate(d: Date): string {
 export default function Dashboard() {
   const router = useRouter();
   const fullName = useAuthStore((s) => s.fullName);
-  const { logout } = useLogout();
 
   const firstName = useMemo(
     () => (fullName ?? '').split(' ')[0] || 'User',
@@ -119,26 +115,6 @@ export default function Dashboard() {
 
   return (
     <SafeAreaView style={styles.root}>
-      {/* Temporary drawer placeholder — replaced in commit 3 with full AppDrawer rewrite */}
-      <Modal
-        transparent
-        animationType="slide"
-        visible={drawerOpen}
-        onRequestClose={() => setDrawerOpen(false)}
-      >
-        <Pressable style={styles.drawerOverlay} onPress={() => setDrawerOpen(false)}>
-          <View style={styles.drawerPanel}>
-            <Text style={styles.drawerName}>{fullName || 'User'}</Text>
-            <Button
-              onPress={() => { void logout(); setDrawerOpen(false); }}
-              variant="ghost"
-            >
-              Logout
-            </Button>
-          </View>
-        </Pressable>
-      </Modal>
-
       {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={() => setDrawerOpen(true)} style={styles.menuBtn}>
@@ -228,22 +204,14 @@ export default function Dashboard() {
           }}
         />
       ) : null}
+
+      <AppDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  // temporary drawer
-  drawerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  drawerPanel: {
-    backgroundColor: colors.surface,
-    padding: spacing.xl,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    gap: spacing.lg,
-  },
-  drawerName: { fontSize: 18, fontWeight: '600', color: colors.primary },
   // header
   header: {
     flexDirection: 'row',
