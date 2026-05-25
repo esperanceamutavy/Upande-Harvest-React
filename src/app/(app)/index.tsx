@@ -199,8 +199,15 @@ export default function Dashboard() {
           onChange={(event, date) => {
             setShowPicker(null);
             if (event.type === 'dismissed' || !date) return;
-            if (showPicker === 'from') setFromDate(date);
-            else setToDate(date);
+            if (showPicker === 'from') {
+              const normalized = new Date(date);
+              normalized.setHours(0, 0, 0, 0);
+              setFromDate(normalized);
+            } else {
+              const normalized = new Date(date);
+              normalized.setHours(23, 59, 59, 999);
+              setToDate(normalized);
+            }
           }}
         />
       ) : null}
