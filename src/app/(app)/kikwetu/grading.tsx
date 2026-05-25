@@ -14,11 +14,13 @@ import { Check, MoreVertical, QrCode } from 'lucide-react-native';
 
 import { useStation } from '../../../features/station/useStation';
 import { useCreateGradingEntry } from '../../../features/grading/useCreateGradingEntry';
+import { useBunchSizeOptions } from '../../../features/grading/useBunchSizeOptions';
 import { playSubmit, playError } from '../../../lib/audio';
 import { haptics } from '../../../lib/haptics';
 import { extractFrappeError } from '../../../lib/api';
 import { BarcodeScannerOverlay } from '../../../features/scanning/BarcodeScannerOverlay';
 import { AppBar } from '../../../components/ui/AppBar';
+import { Picker } from '../../../components/ui/Picker';
 import { Pill } from '../../../components/ui/Pill';
 import { colors, radii, spacing } from '../../../components/ui/theme';
 import type {
@@ -41,7 +43,10 @@ export default function GradingScreen() {
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackMsg | null>(null);
   const [scannerVisible, setScannerVisible] = useState(false);
+  const [overrideEnabled, setOverrideEnabled] = useState(false);
+  const [overrideBunchSize, setOverrideBunchSize] = useState<string>('Bunch(10)');
 
+  const bunchSizeOptions = useBunchSizeOptions();
   const isProcessingRef = useRef(false);
 
   useEffect(() => {
@@ -77,6 +82,9 @@ export default function GradingScreen() {
       grader: bunch.grader,
       bunch_id: bunch.bunch_id,
     };
+    if (overrideEnabled) {
+      payload.bunch_size_override = overrideBunchSize;
+    }
 
     try {
       const res = await createGradingEntry.mutateAsync(payload);
@@ -207,6 +215,32 @@ export default function GradingScreen() {
             <Text style={styles.scanBtnText}>Scan QR</Text>
           </Pressable>
 
+          {/* Bunch size override */}
+          <Pressable
+            onPress={() => setOverrideEnabled((v) => !v)}
+            style={styles.checkboxRow}
+            hitSlop={8}
+          >
+            <View style={[styles.checkbox, overrideEnabled && styles.checkboxChecked]}>
+              {overrideEnabled ? <Check size={14} color="white" /> : null}
+            </View>
+            <Text style={styles.checkboxLabel}>Override bunch size</Text>
+          </Pressable>
+
+          {overrideEnabled ? (
+            <View style={styles.overrideRow}>
+              <Text style={styles.overrideLabel}>Bunch size:</Text>
+              <View style={styles.overridePickerWrap}>
+                <Picker
+                  value={overrideBunchSize}
+                  onValueChange={setOverrideBunchSize}
+                  placeholder="Select bunch size"
+                  items={bunchSizeOptions.map((s) => ({ label: s, value: s }))}
+                />
+              </View>
+            </View>
+          ) : null}
+
           {/* Hint */}
           <View style={styles.hintRow}>
             {loading ? <ActivityIndicator size="small" color={ACCENT} /> : null}
@@ -306,6 +340,36 @@ const styles = StyleSheet.create({
   scanBtnPressed: { opacity: 0.85 },
   scanBtnDisabled: { opacity: 0.4 },
   scanBtnText: { color: 'white', fontSize: 15, fontWeight: '600' },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    alignSelf: 'flex-start',
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'white',
+  },
+  checkboxChecked: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  checkboxLabel: { fontSize: 14, color: colors.primary },
+  overrideRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  overrideLabel: { fontSize: 13, color: colors.muted },
+  overridePickerWrap: { flex: 1 },
   hintRow: {
     flexDirection: 'row',
     alignItems: 'center',

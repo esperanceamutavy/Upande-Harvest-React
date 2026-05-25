@@ -17,6 +17,7 @@ export interface GradingPayload {
   stem_length: string;
   grader: string;
   bunch_id: string;
+  bunch_size_override?: string;  // omit to use server-side item_group derivation
 }
 
 // Response shape from grader3
