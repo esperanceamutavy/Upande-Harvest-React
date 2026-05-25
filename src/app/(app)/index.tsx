@@ -44,6 +44,11 @@ export default function Dashboard() {
   const fullName = useAuthStore((s) => s.fullName);
   const { logout } = useLogout();
 
+  const firstName = useMemo(
+    () => (fullName ?? '').split(' ')[0] || 'User',
+    [fullName],
+  );
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedType, setSelectedType] = useState('All');
   const [fromDate, setFromDate] = useState<Date | null>(null);
@@ -88,8 +93,17 @@ export default function Dashboard() {
           <Text style={styles.entryName}>{item.name}</Text>
           <View style={styles.metaRow}>
             <Text style={styles.metaDate}>{item.posting_date}</Text>
-            <Text style={[styles.metaStatus, item.docstatus === 1 ? styles.submitted : styles.draft]}>
-              {item.docstatus === 1 ? 'Submitted' : 'Draft'}
+            <Text
+              style={[
+                styles.metaStatus,
+                item.docstatus === 1
+                  ? styles.submitted
+                  : item.docstatus === 2
+                    ? styles.cancelled
+                    : styles.draft,
+              ]}
+            >
+              {item.docstatus === 1 ? 'Submitted' : item.docstatus === 2 ? 'Cancelled' : 'Draft'}
             </Text>
           </View>
         </View>
@@ -132,7 +146,7 @@ export default function Dashboard() {
         </Pressable>
         <View style={styles.greeting}>
           <Text style={styles.greetingText}>{getGreeting()}</Text>
-          <Text style={styles.greetingName}>{fullName || 'User'}</Text>
+          <Text style={styles.greetingName}>{firstName}</Text>
         </View>
       </View>
 
@@ -244,8 +258,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.pressed,
   },
   greeting: { flex: 1 },
-  greetingText: { fontSize: 22, fontWeight: '600', color: colors.primary },
-  greetingName: { fontSize: 16, fontWeight: 'bold', color: colors.primary },
+  greetingText: { fontSize: 16, fontWeight: '400', color: colors.primary },
+  greetingName: { fontSize: 22, fontWeight: '600', color: colors.primary },
   // filter bar
   filterBar: {
     flexDirection: 'row',
@@ -315,6 +329,7 @@ const styles = StyleSheet.create({
   metaDate: { fontSize: 13, color: colors.primary },
   metaStatus: { fontSize: 12 },
   submitted: { color: colors.success },
+  cancelled: { color: colors.muted },
   draft: { color: colors.error },
   amount: { fontSize: 17, fontWeight: 'bold', color: colors.primary },
   separator: { height: 1, backgroundColor: colors.borderLight },
