@@ -3,7 +3,6 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ChevronDown } from 'lucide-react-native';
 import {
   BottomSheetModal,
-  BottomSheetModalProvider,
   BottomSheetView,
 } from '@expo/ui/community/bottom-sheet';
 import { colors, radii, spacing, typography } from './theme';
@@ -68,7 +67,6 @@ export function Picker({ value, onValueChange, placeholder, items, disabled }: P
   );
 }
 
-export { BottomSheetModalProvider as PickerProvider };
 
 const styles = StyleSheet.create({
   trigger: {

@@ -1,3 +1,4 @@
+import { BottomSheetModalProvider } from '@expo/ui/community/bottom-sheet';
 import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
@@ -97,7 +98,9 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <RootLayoutNav />
+      <BottomSheetModalProvider>
+        <RootLayoutNav />
+      </BottomSheetModalProvider>
     </QueryClientProvider>
   );
 }
