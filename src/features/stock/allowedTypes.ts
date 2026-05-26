@@ -9,4 +9,5 @@ export const ALLOWED_STOCK_ENTRY_TYPES: readonly string[] = Object.freeze([
   'Harvesting Reject',
   'Grading Rejects',
   'Discard',
+  'Packing',
 ]);
