@@ -33,6 +33,46 @@ const ACCENT = colors.accent;
 
 type FeedbackMsg = { type: 'success' | 'warning' | 'error'; text: string };
 
+function parseGradingQr(raw: string): Record<string, unknown> | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // Type B: single JSON object — try this first since it's the cheap path
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    // Could be single object OR concatenated; try parsing as single first
+    try {
+      const single = JSON.parse(trimmed);
+      if (single && typeof single === 'object' && !Array.isArray(single)) {
+        return single as Record<string, unknown>;
+      }
+    } catch {
+      // fall through to Type A
+    }
+  }
+
+  // Type A: concatenated JSON objects {...}{...}{...}
+  // Match each balanced {...} block. Since QR fields are flat string values
+  // (no nested objects), a simple non-greedy match between { and } is safe.
+  const matches = trimmed.match(/\{[^{}]*\}/g);
+  if (!matches || matches.length === 0) return null;
+
+  const merged: Record<string, unknown> = {};
+  for (const chunk of matches) {
+    try {
+      const obj = JSON.parse(chunk);
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        Object.assign(merged, obj);
+      } else {
+        return null; // chunk parsed but isn't an object — reject the whole scan
+      }
+    } catch {
+      return null; // any chunk fails — reject the whole scan
+    }
+  }
+
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
 export default function GradingScreen() {
   const router = useRouter();
   const station = useStation();
@@ -116,18 +156,11 @@ export default function GradingScreen() {
     setScannerVisible(false);
     if (isProcessingRef.current) return;
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
+    const p = parseGradingQr(raw);
+    if (!p) {
       warn('Invalid QR code format');
       return;
     }
-    if (!parsed || typeof parsed !== 'object') {
-      warn('Invalid QR code format');
-      return;
-    }
-    const p = parsed as Record<string, unknown>;
 
     if (
       typeof p.bunch_id === 'string' &&
