@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 
 import type { ApiError, FrappeErrorBody } from '../types/frappe';
+import { SECURE_KEYS, deleteSecureItem } from './storage';
 import { useAuthStore } from '../stores/auth';
 
 function parseFrappeError(error: AxiosError<FrappeErrorBody>): ApiError {
@@ -31,7 +32,7 @@ function parseFrappeError(error: AxiosError<FrappeErrorBody>): ApiError {
 }
 
 /**
- * Single axios instance. Base URL and Authorization header are injected
+ * Single axios instance. Base URL and session cookie are injected
  * per-request in the request interceptor (Phase 1.3).
  * STACK.md §HTTP: no mutable shared headers — always injected via interceptor.
  */
@@ -39,20 +40,29 @@ export const apiClient = axios.create();
 
 // Request interceptor — reads live store state so every request picks up current credentials.
 apiClient.interceptors.request.use((config) => {
-  const { instanceUrl, apiKey, apiSecret } = useAuthStore.getState();
+  const { instanceUrl, sid } = useAuthStore.getState();
   if (instanceUrl) {
     config.baseURL = instanceUrl;
   }
-  if (apiKey && apiSecret) {
-    config.headers.Authorization = `token ${apiKey}:${apiSecret}`;
+  if (sid) {
+    config.headers.Cookie = `sid=${sid}`;
   }
   return config;
 });
 
-// Response interceptor — normalise Frappe errors → ApiError
+// Response interceptor — normalise Frappe errors → ApiError.
+// A 401 means the session cookie is expired/invalid — clear auth so the gate
+// routes back to login. 403 is a legit per-endpoint permission error, not session
+// expiry, so we do NOT auto-logout on it.
 apiClient.interceptors.response.use(
   (response) => response,
-  (error: AxiosError<FrappeErrorBody>) => Promise.reject(parseFrappeError(error)),
+  (error: AxiosError<FrappeErrorBody>) => {
+    if (error.response?.status === 401) {
+      useAuthStore.getState().clearCredentials();
+      void deleteSecureItem(SECURE_KEYS.SID);
+    }
+    return Promise.reject(parseFrappeError(error));
+  },
 );
 
 export function extractFrappeError(e: unknown): string {

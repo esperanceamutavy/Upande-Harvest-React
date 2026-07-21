@@ -18,32 +18,29 @@ export async function normalizeUrl(bareUrl: string): Promise<string> {
   }
 }
 
-export interface LoginKeys {
+export interface LoginSession {
   instanceUrl: string;
-  apiKey: string;
-  apiSecret: string;
+  sid: string;
   fullName: string;
 }
 
 /**
- * Three-step login:
+ * Single-step cookie login:
  *   1. normalizeUrl — https:// with http:// fallback
- *   2. POST /api/method/login — get sid cookie (lives only in this function scope)
- *   3. POST generate_keys — exchange cookie for permanent api_key + api_secret
+ *   2. POST /api/method/login — get the sid session cookie
  *
- * The sid cookie is a local const and is never written to any storage.
+ * The sid is returned to the caller, which persists it as the only credential.
+ * Every subsequent authenticated request sends it as `Cookie: sid=<sid>`.
  */
-export async function loginAndGetKeys(
+export async function loginAndGetSession(
   bareUrl: string,
   email: string,
   password: string,
-): Promise<LoginKeys> {
+): Promise<LoginSession> {
   const instanceUrl = await normalizeUrl(bareUrl);
 
-  // ── Step 1: cookie login ─────────────────────────────────────────────────
+  // ── Cookie login ─────────────────────────────────────────────────────────
   console.log(`[auth] Posting login to ${instanceUrl}`);
-  let rawCookie: string;
-  let fullName: string;
 
   try {
     const loginRes = await loginClient.post(
@@ -63,9 +60,9 @@ export async function loginAndGetKeys(
       throw new Error('Login failed — server did not return a session. Check your credentials.');
     }
 
-    fullName = (loginRes.data as { full_name?: string }).full_name ?? email;
-    rawCookie = `sid=${sid}`;
-    console.log('[auth] Login successful, got cookie');
+    const fullName = (loginRes.data as { full_name?: string }).full_name ?? email;
+    console.log('[auth] Login successful, got session cookie');
+    return { instanceUrl, sid, fullName };
   } catch (err: unknown) {
     if (axios.isAxiosError(err)) {
       if (err.response) {
@@ -77,50 +74,5 @@ export async function loginAndGetKeys(
     }
     if (err instanceof Error) throw err;
     throw new Error('Login failed.');
-  }
-
-  // ── Step 2: generate_keys ────────────────────────────────────────────────
-  // Cookie passed as a request header — never stored anywhere.
-  console.log(`[auth] Generating API key for ${email}`);
-  try {
-    const keysRes = await loginClient.post(
-      `${instanceUrl}/api/method/frappe.core.doctype.user.user.generate_keys`,
-      new URLSearchParams({ user: email }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Cookie: rawCookie,
-        },
-      },
-    );
-
-    const message = (
-      keysRes.data as { message?: { api_key?: string; api_secret?: string } } | undefined
-    )?.message;
-
-    const apiKey = message?.api_key;
-    const apiSecret = message?.api_secret;
-
-    if (apiKey && !apiSecret) {
-      throw new Error(
-        'Server did not return API secret. Please contact your administrator to reset your API key.',
-      );
-    }
-    if (!apiKey || !apiSecret) {
-      throw new Error('Server did not return API credentials. Please try again.');
-    }
-
-    console.log('[auth] Generated API key');
-    return { instanceUrl, apiKey, apiSecret, fullName };
-  } catch (err: unknown) {
-    if (axios.isAxiosError(err)) {
-      if (err.response) {
-        const data = err.response.data as { message?: string } | undefined;
-        throw new Error(data?.message ?? 'Failed to generate API key. Please try again.');
-      }
-      throw new Error('Failed to generate API key. Please try again.');
-    }
-    if (err instanceof Error) throw err;
-    throw new Error('Failed to generate API key. Please try again.');
   }
 }

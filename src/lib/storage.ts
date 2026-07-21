@@ -10,8 +10,7 @@ export const STORAGE_KEYS = {
 
 /** Sensitive keys stored in expo-secure-store */
 export const SECURE_KEYS = {
-  API_KEY: 'api_key',
-  API_SECRET: 'api_secret',
+  SID: 'sid',
   INSTANCE_URL: 'instanceurl',
 } as const;
 

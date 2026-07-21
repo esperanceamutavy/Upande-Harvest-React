@@ -34,18 +34,16 @@ function RootLayoutNav() {
   useEffect(() => {
     async function hydrate() {
       void initAudio(); // fire-and-forget; players needed before first workflow screen
-      const [apiKey, apiSecret, instanceUrl, fullName, email, stationJson] = await Promise.all([
-        getSecureItem(SECURE_KEYS.API_KEY),
-        getSecureItem(SECURE_KEYS.API_SECRET),
+      const [sid, instanceUrl, fullName, email, stationJson] = await Promise.all([
+        getSecureItem(SECURE_KEYS.SID),
         getSecureItem(SECURE_KEYS.INSTANCE_URL),
         getStorageItem('fullname'),
         getStorageItem(STORAGE_KEYS.EMAIL_BACKUP),
         getStorageItem(STORAGE_KEYS.USER_STATION),
       ]);
-      if (apiKey && apiSecret && instanceUrl) {
+      if (sid && instanceUrl) {
         setCredentials({
-          apiKey,
-          apiSecret,
+          sid,
           instanceUrl,
           fullName: fullName ?? '',
           email: email ?? '',

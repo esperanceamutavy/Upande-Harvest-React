@@ -1,15 +1,13 @@
 import { create } from 'zustand';
 
 interface AuthState {
-  apiKey: string | null;
-  apiSecret: string | null;
+  sid: string | null;
   instanceUrl: string | null;
   fullName: string | null;
   email: string | null;
   isAuthenticated: boolean;
   setCredentials: (params: {
-    apiKey: string;
-    apiSecret: string;
+    sid: string;
     instanceUrl: string;
     fullName: string;
     email: string;
@@ -18,18 +16,16 @@ interface AuthState {
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
-  apiKey: null,
-  apiSecret: null,
+  sid: null,
   instanceUrl: null,
   fullName: null,
   email: null,
   isAuthenticated: false,
-  setCredentials: ({ apiKey, apiSecret, instanceUrl, fullName, email }) =>
-    set({ apiKey, apiSecret, instanceUrl, fullName, email, isAuthenticated: true }),
+  setCredentials: ({ sid, instanceUrl, fullName, email }) =>
+    set({ sid, instanceUrl, fullName, email, isAuthenticated: true }),
   clearCredentials: () =>
     set({
-      apiKey: null,
-      apiSecret: null,
+      sid: null,
       instanceUrl: null,
       fullName: null,
       email: null,

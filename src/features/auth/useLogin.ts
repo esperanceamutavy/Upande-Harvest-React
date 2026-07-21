@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import { SECURE_KEYS, STORAGE_KEYS, setSecureItem, setStorageItem } from '../../lib/storage';
 import { useAuthStore } from '../../stores/auth';
-import { loginAndGetKeys } from './authService';
+import { loginAndGetSession } from './authService';
 
 export interface LoginInput {
   url: string;
@@ -19,7 +19,7 @@ export function useLogin() {
     setIsLoading(true);
     setError(null);
     try {
-      const { instanceUrl, apiKey, apiSecret, fullName } = await loginAndGetKeys(
+      const { instanceUrl, sid, fullName } = await loginAndGetSession(
         url.trim(),
         email.trim(),
         password,
@@ -27,8 +27,7 @@ export function useLogin() {
 
       // Persist sensitive credentials to SecureStore
       await Promise.all([
-        setSecureItem(SECURE_KEYS.API_KEY, apiKey),
-        setSecureItem(SECURE_KEYS.API_SECRET, apiSecret),
+        setSecureItem(SECURE_KEYS.SID, sid),
         setSecureItem(SECURE_KEYS.INSTANCE_URL, instanceUrl),
       ]);
 
@@ -41,7 +40,7 @@ export function useLogin() {
       ]);
 
       console.log('[auth] Stored credentials');
-      setCredentials({ apiKey, apiSecret, instanceUrl, fullName, email: email.trim() });
+      setCredentials({ sid, instanceUrl, fullName, email: email.trim() });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
       setError(message);
