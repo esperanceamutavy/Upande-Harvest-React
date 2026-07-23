@@ -81,7 +81,7 @@ export default function Dashboard() {
   const renderItem = useCallback(
     ({ item }: { item: StockEntry }) => (
       <Pressable
-        onPress={() => router.push(`/kikwetu/stock-entry/${item.name}`)}
+        onPress={() => router.push(`/stock-entry/${item.name}`)}
         style={styles.card}
       >
         <View style={styles.cardLeft}>

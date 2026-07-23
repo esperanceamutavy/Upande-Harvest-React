@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  PackagePlus,
   Settings,
   Monitor,
   type LucideIcon,
@@ -21,9 +22,9 @@ export interface DrawerItem {
 }
 
 export const WORKFLOW_ITEMS: DrawerItem[] = [
+  { label: 'Receiving', icon: PackagePlus, route: '/receiving' },
   { label: 'Bucket Transfer', icon: ArrowLeftRight, route: '/bucket-transfer' },
   // Uncomment (and import its icon) as each screen is built — build order §7:
-  //   Receiving  → PackagePlus   → '/receiving'
   //   Rejects    → XCircle       → '/rejects'    (= coldroom discard flow)
   //   Shelving   → LayoutGrid    → '/shelving'
   //   Issuing    → PackageCheck  → '/issuing'
