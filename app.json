@@ -16,7 +16,17 @@
         "foregroundImage": "./assets/images/upande_logo.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.upande.xflora"
+      "package": "com.upande.xflora",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "web": {
       "output": "static",
@@ -46,8 +56,15 @@
     "extra": {
       "router": {},
       "eas": {
+        "projectId": "a3ce4af2-f21d-4489-96d8-586c17d57850"
       }
     },
-    "owner": "e_a_b123"
+    "owner": "e_a_b123",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/a3ce4af2-f21d-4489-96d8-586c17d57850"
+    }
   }
 }
