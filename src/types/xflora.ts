@@ -20,10 +20,18 @@ export interface XfloraReceivingPayload {
   bunchSize: number | null;
   /** Number of bunches — only sent (non-null) when bunched. */
   quantity: number | null;
+  /** Partial-bucket override: stems to record instead of the full bucket qty.
+   *  Only sent (non-null) when the partial-bucket toggle is on. Mutually exclusive
+   *  with bunched. The server enforces the ceiling and throws on violation. */
+  overrideQty: number | null;
 }
 
 export interface XfloraReceivingResult {
   message: string;
+  /** True when the server applied the partial override. */
+  overrideApplied: boolean;
+  /** Stems actually recorded (present when override_applied). */
+  qty: number | null;
 }
 
 /** Issuing (Issue from Coldstore). Three calls: list orders → list an order's packing

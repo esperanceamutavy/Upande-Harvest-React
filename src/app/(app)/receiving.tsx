@@ -57,6 +57,8 @@ export default function ReceivingScreen() {
   const [isBunched, setIsBunched] = useState(false);
   const [selectedBunchSize, setSelectedBunchSize] = useState<number | null>(null);
   const [quantity, setQuantity] = useState('');
+  const [isPartial, setIsPartial] = useState(false);
+  const [overrideQty, setOverrideQty] = useState('');
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackMsg | null>(null);
   const [scannerVisible, setScannerVisible] = useState(false);
@@ -104,6 +106,19 @@ export default function ReceivingScreen() {
       }
     }
 
+    // Partial-bucket mode requires a positive stems override before a scan is accepted.
+    if (isPartial) {
+      const ov = Number.parseInt(overrideQty.trim(), 10);
+      if (!overrideQty.trim()) {
+        warn('Enter the override stems first.');
+        return;
+      }
+      if (!Number.isFinite(ov) || ov <= 0) {
+        warn('Override stems must be a positive number.');
+        return;
+      }
+    }
+
     let bucketId: string | null = null;
     try {
       const parsed = JSON.parse(raw) as unknown;
@@ -129,6 +144,7 @@ export default function ReceivingScreen() {
     haptics.light();
 
     const qty = isBunched ? Number.parseInt(quantity.trim(), 10) : null;
+    const ov = isPartial ? Number.parseInt(overrideQty.trim(), 10) : null;
     try {
       const res = await createReceivingEntry.mutateAsync({
         bucketId,
@@ -136,9 +152,14 @@ export default function ReceivingScreen() {
         isBunched,
         bunchSize: isBunched ? selectedBunchSize : null,
         quantity: isBunched ? qty : null,
+        overrideQty: ov,
       });
       playSubmit();
-      setFeedback({ type: 'success', text: res.message });
+      const text =
+        res.overrideApplied && res.qty != null
+          ? `Received ${res.qty.toLocaleString()} stems (partial)`
+          : res.message;
+      setFeedback({ type: 'success', text });
     } catch (e) {
       playError();
       haptics.medium();
@@ -172,12 +193,23 @@ export default function ReceivingScreen() {
   }
 
   function toggleBunched() {
+    if (isPartial) return; // mutually exclusive with partial-bucket override
     setIsBunched((prev) => {
       const next = !prev;
       if (!next) {
         setSelectedBunchSize(null);
         setQuantity('');
       }
+      return next;
+    });
+    textInputRef.current?.focus();
+  }
+
+  function togglePartial() {
+    if (isBunched) return; // mutually exclusive with bunched
+    setIsPartial((prev) => {
+      const next = !prev;
+      if (!next) setOverrideQty('');
       return next;
     });
     textInputRef.current?.focus();
@@ -206,14 +238,35 @@ export default function ReceivingScreen() {
             </View>
           </Pressable>
 
-          {/* Is Bunched toggle */}
-          <Pressable onPress={toggleBunched} style={styles.toggleRow}>
+          {/* Is Bunched toggle — disabled while partial-bucket override is active */}
+          <Pressable
+            onPress={toggleBunched}
+            disabled={isPartial}
+            style={[styles.toggleRow, isPartial && styles.toggleRowDisabled]}
+          >
             <View style={[styles.checkbox, isBunched && styles.checkboxChecked]}>
               {isBunched ? <Check size={14} color="white" /> : null}
             </View>
             <View style={styles.toggleLabels}>
               <Text style={styles.toggleLabel}>Is Bunched</Text>
               <Text style={styles.toggleHint}>{isBunched ? 'Bunched' : 'Not bunched'}</Text>
+            </View>
+          </Pressable>
+
+          {/* Partial bucket override toggle — disabled while bunched is active */}
+          <Pressable
+            onPress={togglePartial}
+            disabled={isBunched}
+            style={[styles.toggleRow, isBunched && styles.toggleRowDisabled]}
+          >
+            <View style={[styles.checkbox, isPartial && styles.checkboxChecked]}>
+              {isPartial ? <Check size={14} color="white" /> : null}
+            </View>
+            <View style={styles.toggleLabels}>
+              <Text style={styles.toggleLabel}>Partial bucket (override qty)</Text>
+              <Text style={styles.toggleHint}>
+                {isPartial ? `Override: ${overrideQty || '—'} stems` : 'Record full bucket qty'}
+              </Text>
             </View>
           </Pressable>
 
@@ -248,6 +301,23 @@ export default function ReceivingScreen() {
                   onChangeText={(t) => setQuantity(t.replace(/[^0-9]/g, ''))}
                   keyboardType="number-pad"
                   placeholder="Enter number of bunches"
+                  placeholderTextColor={colors.muted}
+                  editable={!loading}
+                />
+              </Field>
+            </View>
+          ) : null}
+
+          {/* Partial override stems (only when partial) — persists across scans */}
+          {isPartial ? (
+            <View style={styles.bunchCard}>
+              <Field label="Override stems (partial bucket)">
+                <TextInput
+                  style={styles.input}
+                  value={overrideQty}
+                  onChangeText={(t) => setOverrideQty(t.replace(/[^0-9]/g, ''))}
+                  keyboardType="number-pad"
+                  placeholder="Enter stems received"
                   placeholderTextColor={colors.muted}
                   editable={!loading}
                 />
@@ -316,6 +386,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkboxChecked: { backgroundColor: ACCENT, borderColor: ACCENT },
+  toggleRowDisabled: { opacity: 0.4 },
   toggleLabels: { flex: 1, gap: 2 },
   toggleLabel: { fontSize: 14, fontWeight: '600', color: colors.primary },
   toggleHint: { fontSize: 12, color: colors.muted },
