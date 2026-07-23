@@ -1,10 +1,13 @@
 import { BottomSheetModalProvider } from '@expo/ui/community/bottom-sheet';
 import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
+import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 import '../lib/sentry'; // side-effect: initialises Sentry once at module load
+import '../lib/fonts'; // side-effect: patches Text/TextInput to default to DM Sans
+import { APP_FONTS } from '../lib/fonts';
 import { initAudio } from '../lib/audio';
 import { getSecureItem, getStorageItem, SECURE_KEYS, STORAGE_KEYS } from '../lib/storage';
 import { useAuthStore } from '../stores/auth';
@@ -14,6 +17,7 @@ const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   const [hydrated, setHydrated] = useState(false);
+  const [fontsLoaded] = useFonts(APP_FONTS);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const setCredentials = useAuthStore((s) => s.setCredentials);
   const setFarm = useFarmStore((s) => s.setFarm);
@@ -65,10 +69,15 @@ function RootLayoutNav() {
         }
       }
       setHydrated(true);
-      await SplashScreen.hideAsync();
     }
     void hydrate();
   }, []);
+
+  // Hold the splash until BOTH state hydration and the DM Sans/Poppins fonts are
+  // ready, so the first paint is never in the wrong typeface.
+  useEffect(() => {
+    if (hydrated && fontsLoaded) void SplashScreen.hideAsync();
+  }, [hydrated, fontsLoaded]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -79,6 +88,8 @@ function RootLayoutNav() {
       router.replace('/(app)');
     }
   }, [isAuthenticated, segments, hydrated]);
+
+  if (!hydrated || !fontsLoaded) return null;
 
   return <Stack screenOptions={{ headerShown: false }} />;
 }

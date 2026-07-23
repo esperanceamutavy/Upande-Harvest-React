@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, radii, spacing } from './theme';
+import { colors, fontFamily, fontSize, radii, spacing } from './theme';
 
 type Variant = 'success' | 'warning' | 'error' | 'info' | 'neutral';
 
@@ -34,7 +34,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   text: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontFamily: fontFamily.semiBold,
+    fontSize: fontSize.sm,
   },
 });

@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, ViewStyle } from 'react-native';
 import { ReactNode } from 'react';
-import { colors, radii, spacing } from './theme';
+import { colors, fontFamily, fontSize, radii, spacing } from './theme';
 
 interface ButtonProps {
   onPress: () => void;
@@ -47,13 +47,13 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   primaryText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fontFamily.semiBold,
+    fontSize: fontSize.md,
     color: '#fff',
   },
   ghostText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fontFamily.semiBold,
+    fontSize: fontSize.md,
     color: colors.primary,
   },
 });

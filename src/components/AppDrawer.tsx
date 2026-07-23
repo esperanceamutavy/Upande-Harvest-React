@@ -17,7 +17,7 @@ import { useAuthStore } from '../stores/auth';
 import { useLogout } from '../features/auth/useLogout';
 import { useFarm } from '../features/station/useFarm';
 import { WORKFLOW_ITEMS, UTILITY_ITEMS, type DrawerItem } from '../features/navigation/drawerItems';
-import { colors, radii, spacing } from './ui/theme';
+import { colors, fontFamily, radii, spacing } from './ui/theme';
 
 const DRAWER_WIDTH = Math.min(Dimensions.get('window').width * 0.75, 320);
 
@@ -180,10 +180,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { fontSize: 22, fontWeight: 'bold', color: 'white' },
+  avatarText: { fontFamily: fontFamily.bold, fontSize: 22, color: 'white' },
   fullName: {
+    fontFamily: fontFamily.bold,
     fontSize: 18,
-    fontWeight: 'bold',
     color: 'white',
     marginTop: spacing.md,
   },
@@ -205,7 +205,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   menuItemPressed: { backgroundColor: colors.pressed },
-  menuLabel: { fontSize: 15, fontWeight: '600', color: colors.primary },
+  menuLabel: { fontFamily: fontFamily.medium, fontSize: 15, color: colors.primary },
   divider: { height: 1, backgroundColor: colors.borderLight, marginVertical: spacing.xs },
   footer: { borderTopWidth: 1, borderTopColor: colors.borderLight },
   logoutLabel: { color: colors.error },
