@@ -25,3 +25,24 @@ export interface XfloraReceivingPayload {
 export interface XfloraReceivingResult {
   message: string;
 }
+
+/** Discard ("Rejects" in the drawer) — POST /api/method/createDiscardEntry { bucket_id }.
+ *  The scanned QR carries the id under the `coldroom_bucket` key. The endpoint returns
+ *  HTTP 200 for both success and business failures (e.g. an under-age bucket); branch on
+ *  `status` / `reason`, not the HTTP code. Ported from xflora_discard_response.dart. */
+export interface XfloraDiscardPayload {
+  bucketId: string;
+  ageDays: number | null;
+  variety: string | null;
+  stems: number | null;
+  discardEntry: string | null;
+}
+
+export interface XfloraDiscardResponse {
+  /** "success" on success; any other value is a failure. */
+  status: string;
+  /** e.g. "bucket_too_young" — drives the blocking dialog. */
+  reason: string | null;
+  message: string;
+  payload: XfloraDiscardPayload | null;
+}

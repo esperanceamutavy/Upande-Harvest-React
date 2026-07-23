@@ -3,6 +3,7 @@ import {
   PackagePlus,
   Settings,
   Monitor,
+  XCircle,
   type LucideIcon,
 } from 'lucide-react-native';
 
@@ -23,9 +24,9 @@ export interface DrawerItem {
 
 export const WORKFLOW_ITEMS: DrawerItem[] = [
   { label: 'Receiving', icon: PackagePlus, route: '/receiving' },
+  { label: 'Rejects', icon: XCircle, route: '/rejects' }, // = coldroom discard flow
   { label: 'Bucket Transfer', icon: ArrowLeftRight, route: '/bucket-transfer' },
   // Uncomment (and import its icon) as each screen is built — build order §7:
-  //   Rejects    → XCircle       → '/rejects'    (= coldroom discard flow)
   //   Shelving   → LayoutGrid    → '/shelving'
   //   Issuing    → PackageCheck  → '/issuing'
   //
