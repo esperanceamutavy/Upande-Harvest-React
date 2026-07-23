@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 export const STORAGE_KEYS = {
   INSTANCE_URL_BACKUP: 'instanceurl_backup',
   EMAIL_BACKUP: 'email_backup',
-  USER_STATION: 'userStation',
+  USER_FARM: 'userFarm',
 } as const;
 
 /** Sensitive keys stored in expo-secure-store */

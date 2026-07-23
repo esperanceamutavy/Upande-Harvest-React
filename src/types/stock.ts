@@ -19,9 +19,11 @@ export interface StockEntryType {
   name: string;
 }
 
-/** Farm doctype. name === farm_name due to autoname "format:{farm_name}" — confirmed from Frappe schema. */
+/** Farm doctype. `name` is the doc id (sent to the API); `farm_name` is the display label
+ *  (Data field, confirmed via live Xflora schema). See XFLORA_PORT_PLAN.md §5.2. */
 export interface Farm {
   name: string;
+  farm_name?: string;
 }
 
 /** Warehouse doctype — only name is needed for station configuration. */

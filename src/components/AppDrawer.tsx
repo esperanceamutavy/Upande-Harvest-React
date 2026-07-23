@@ -11,47 +11,15 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import {
-  Box,
-  Hexagon,
-  LogOut,
-  Monitor,
-  PackagePlus,
-  Scissors,
-  Settings,
-  Trash2,
-  Truck,
-  X,
-  XCircle,
-} from 'lucide-react-native';
+import { LogOut, X } from 'lucide-react-native';
 
 import { useAuthStore } from '../stores/auth';
 import { useLogout } from '../features/auth/useLogout';
-import { useStation } from '../features/station/useStation';
+import { useFarm } from '../features/station/useFarm';
+import { WORKFLOW_ITEMS, UTILITY_ITEMS, type DrawerItem } from '../features/navigation/drawerItems';
 import { colors, radii, spacing } from './ui/theme';
 
 const DRAWER_WIDTH = Math.min(Dimensions.get('window').width * 0.75, 320);
-
-interface MenuItem {
-  label: string;
-  icon: React.ReactNode;
-  route: string;
-}
-
-const KIKWETU_ITEMS: MenuItem[] = [
-  { label: 'Harvesting', icon: <Scissors size={20} color={colors.primary} />, route: '/kikwetu/harvesting' },
-  { label: 'Receiving',  icon: <PackagePlus size={20} color={colors.primary} />, route: '/kikwetu/receiving' },
-  { label: 'Grading',   icon: <Hexagon size={20} color={colors.primary} />, route: '/kikwetu/grading' },
-  { label: 'Packing',   icon: <Box size={20} color={colors.primary} />, route: '/kikwetu/packing' },
-  { label: 'Dispatch',  icon: <Truck size={20} color={colors.primary} />, route: '/kikwetu/dispatch' },
-  { label: 'Discards',  icon: <Trash2 size={20} color={colors.primary} />, route: '/kikwetu/discards' },
-  { label: 'Rejects',   icon: <XCircle size={20} color={colors.primary} />, route: '/kikwetu/rejects' },
-];
-
-const UTILITY_ITEMS: MenuItem[] = [
-  { label: 'Configure Farm', icon: <Settings size={20} color={colors.primary} />, route: '/configure' },
-  { label: 'View ERP Desk',  icon: <Monitor size={20} color={colors.primary} />, route: '/erp-desk' },
-];
 
 interface AppDrawerProps {
   isOpen: boolean;
@@ -62,7 +30,7 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
   const router = useRouter();
   const fullName = useAuthStore((s) => s.fullName);
   const email = useAuthStore((s) => s.email);
-  const station = useStation();
+  const farm = useFarm();
   const { logout } = useLogout();
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -89,6 +57,20 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
   function navigate(route: string) {
     onClose();
     router.push(route as never);
+  }
+
+  function renderItem(item: DrawerItem) {
+    const Icon = item.icon;
+    return (
+      <Pressable
+        key={item.route}
+        onPress={() => navigate(item.route)}
+        style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+      >
+        <Icon size={20} color={colors.primary} />
+        <Text style={styles.menuLabel}>{item.label}</Text>
+      </Pressable>
+    );
   }
 
   function confirmLogout() {
@@ -131,38 +113,18 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
           {email ? <Text style={styles.emailText}>{email}</Text> : null}
           <View style={styles.stationCard}>
             <Text style={styles.stationText}>
-              {station
-                ? `${station.farmName} Farm · ${station.warehouseName}`
-                : 'No station configured'}
+              {farm ? `${farm.farmName} Farm` : 'No farm configured'}
             </Text>
           </View>
         </View>
 
         {/* Menu items */}
         <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-          {KIKWETU_ITEMS.map((item) => (
-            <Pressable
-              key={item.route}
-              onPress={() => navigate(item.route)}
-              style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
-            >
-              {item.icon}
-              <Text style={styles.menuLabel}>{item.label}</Text>
-            </Pressable>
-          ))}
+          {WORKFLOW_ITEMS.map(renderItem)}
 
           <View style={styles.divider} />
 
-          {UTILITY_ITEMS.map((item) => (
-            <Pressable
-              key={item.route}
-              onPress={() => navigate(item.route)}
-              style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
-            >
-              {item.icon}
-              <Text style={styles.menuLabel}>{item.label}</Text>
-            </Pressable>
-          ))}
+          {UTILITY_ITEMS.map(renderItem)}
         </ScrollView>
 
         {/* Footer: logout */}

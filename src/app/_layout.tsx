@@ -8,7 +8,7 @@ import '../lib/sentry'; // side-effect: initialises Sentry once at module load
 import { initAudio } from '../lib/audio';
 import { getSecureItem, getStorageItem, SECURE_KEYS, STORAGE_KEYS } from '../lib/storage';
 import { useAuthStore } from '../stores/auth';
-import { useStationStore } from '../stores/station';
+import { useFarmStore } from '../stores/farm';
 
 const queryClient = new QueryClient();
 
@@ -16,7 +16,7 @@ function RootLayoutNav() {
   const [hydrated, setHydrated] = useState(false);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const setCredentials = useAuthStore((s) => s.setCredentials);
-  const setStation = useStationStore((s) => s.setStation);
+  const setFarm = useFarmStore((s) => s.setFarm);
   const segments = useSegments();
   const router = useRouter();
 
@@ -34,12 +34,12 @@ function RootLayoutNav() {
   useEffect(() => {
     async function hydrate() {
       void initAudio(); // fire-and-forget; players needed before first workflow screen
-      const [sid, instanceUrl, fullName, email, stationJson] = await Promise.all([
+      const [sid, instanceUrl, fullName, email, farmJson] = await Promise.all([
         getSecureItem(SECURE_KEYS.SID),
         getSecureItem(SECURE_KEYS.INSTANCE_URL),
         getStorageItem('fullname'),
         getStorageItem(STORAGE_KEYS.EMAIL_BACKUP),
-        getStorageItem(STORAGE_KEYS.USER_STATION),
+        getStorageItem(STORAGE_KEYS.USER_FARM),
       ]);
       if (sid && instanceUrl) {
         setCredentials({
@@ -49,18 +49,16 @@ function RootLayoutNav() {
           email: email ?? '',
         });
       }
-      if (stationJson) {
+      if (farmJson) {
         try {
-          const parsed = JSON.parse(stationJson);
+          const parsed = JSON.parse(farmJson);
           if (
             parsed &&
             typeof parsed === 'object' &&
             typeof parsed.farm === 'string' &&
-            typeof parsed.warehouse === 'string' &&
-            typeof parsed.farmName === 'string' &&
-            typeof parsed.warehouseName === 'string'
+            typeof parsed.farmName === 'string'
           ) {
-            setStation(parsed);
+            setFarm(parsed);
           }
         } catch {
           // corrupt JSON — silently skip

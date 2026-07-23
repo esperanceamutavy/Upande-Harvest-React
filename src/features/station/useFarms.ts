@@ -5,7 +5,7 @@ import type { Farm } from '../../types/stock';
 async function fetchFarms(): Promise<Farm[]> {
   const res = await apiClient.get<{ data: Farm[] }>('/api/resource/Farm', {
     params: {
-      fields: JSON.stringify(['name']),
+      fields: JSON.stringify(['name', 'farm_name']),
       limit: 1000,
     },
   });
