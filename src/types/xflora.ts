@@ -26,6 +26,33 @@ export interface XfloraReceivingResult {
   message: string;
 }
 
+/** Issuing (Issue from Coldstore). Three calls: list orders → list an order's packing
+ *  items → issue a scanned bucket. Ported from xflora_ready_sale_order_items.dart. */
+export interface XfloraReadySaleOrderItem {
+  variety: string;
+  bucket: string;
+  stemLength: string;
+  shelf: string;
+  saleOrderItem: string;
+  mixed: number;
+  downgradeTo: string | null;
+  qty: string;
+  team: string;
+  /** From `custom_issued`. Also flipped optimistically on a 200/409 issue. */
+  isIssued: boolean;
+  oplName: string;
+}
+
+export interface XfloraIssuePayload {
+  bucketId: string;
+  saleOrderItem: string;
+  oplName: string;
+}
+
+export interface XfloraIssueResult {
+  message: string;
+}
+
 /** Shelving — POST /api/method/shelving_entry { farm, shelf_id, bucket_id }.
  *  Sequential dual scan: shelf QR (`shelf` key) then bucket QR (`coldroom_bucket` key).
  *  `farm` comes from the configured farm (useFarm), not the scan. */

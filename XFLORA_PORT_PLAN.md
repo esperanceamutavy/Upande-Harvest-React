@@ -86,7 +86,7 @@ The 5 v1 workflows below all have a Flutter Xflora reference. Grading / Packing 
 
 ### 2.4 Shelving  ✅ has Flutter reference
 - **Flutter:** `xflora/xflora_shelving_entry.dart` → `XfloraShelvingEntry(userFarm)`.
-- **API:** `POST /api/method/shelving_entry` with `{ farm, shelf_id, bucket_id }`. `farm` comes from the configured station (`station.farm`), **not** scanned.
+- **API:** `POST /api/method/shelving_entry` with `{ farm, shelf_id, bucket_id }`. `farm` comes from the configured farm (`useFarm()`), **not** scanned. **Backend effect (verified live):** creates **no Stock Entry** — it writes **Shelf Item / Shelf Item Log** records and updates the **Coldroom Bucket QR Code** doc (e.g. Shelf Item Log 43679). So success is confirmed by feedback + a Shelf Item Log record, never a dashboard entry; `Shelving` is excluded from `allowedTypes.ts` (§5.1).
 - **Scan flow:** **dual scan, sequential.** Scan **Shelf** QR (extract `shelf` key) → auto-focus Bucket → scan **Bucket** QR (extract **`coldroom_bucket`** key) → auto-submits `{ farm, shelf_id, bucket_id }`. 500ms debouncer on each field to absorb HID keystrokes. On success clears only the bucket field and refocuses it (shelf persists for batch shelving onto one shelf). "Clear Form" button resets both.
 - **RN start point:** **built new**; reuse the sequential dual-scan pattern from Bucket Transfer (build that first). Needs `farm.farm` from `useFarm()` (§5.2); redirect to `/configure` if no farm is set. New hook `useCreateXfloraShelvingEntry`.
 - **Verdict:** new, but shares the dual-scan harness with Bucket Transfer.
@@ -172,7 +172,6 @@ Single-instance ⇒ the multi-client abstraction is dead weight (and currently u
 ```ts
 export const ALLOWED_STOCK_ENTRY_TYPES = Object.freeze([
   'Receiving',
-  'Shelving',
   'Bucket Transfer',
   'Grading',
   'Grading Rejects',
@@ -185,6 +184,8 @@ export const ALLOWED_STOCK_ENTRY_TYPES = Object.freeze([
 ]);
 ```
 No code change needed in `useStockEntryTypes.ts` (it just re-exports the array). The dashboard picker + list pick these up automatically. **Confirm the final list with the user** — some of these (Quarantine, Field Reject) may not belong on the mobile dashboard.
+
+**`Shelving` is deliberately NOT in this list.** Backend verification showed the `shelving_entry` flow creates **no Stock Entry** — it writes **Shelf Item / Shelf Item Log** records and updates the **Coldroom Bucket QR Code** doc (verified: Shelf Item Log 43679 from a real device scan). A `Shelving` filter option could therefore never match a Stock Entry, so it's excluded from the dashboard history filter. (Bucket Transfer and Receiving *do* create Stock Entries and stay.)
 
 **Note — dashboard filter ≠ v1 workflows.** The dashboard is a read-only history view of Stock Entry records that already exist on the backend. It's fine (and probably desirable) to keep `Grading`, `Packing`, and the reject types in this filter list even though those *creation* workflows are v2 — users can still see those entries. So the allowlist above intentionally includes types with no v1 create-screen. This is independent of the drawer.
 
@@ -249,8 +250,8 @@ v1 = the 5 reference-backed screens, simplest first. Each screen: new feature-fo
 | 1 | **Bucket Transfer** | ✅ | Device- + backend-verified: real phone scans auto-submitted `transfer_bucket` → **MAT-STE-2026-185613** on live Xflora, byte-for-byte matching Flutter production conventions. Files: `app/(app)/bucket-transfer.tsx` + `features/bucket-transfer/useXfloraBucketTransfer.ts` + `types/xflora.ts`. |
 | 2 | **Receiving** | ✅ | Device- + backend-verified: real phone scan → `receiving_entry` → **MAT-STE-2026-185611** on live Xflora, correctly shaped, matching production. Files: `app/(app)/receiving.tsx` + `features/receiving/useCreateXfloraReceivingEntry.ts`. Contract carries no farm → no `/configure` gate. Batch id persists; bunched requires size+qty; continuous-scan loop refocuses. |
 | 3 | **Rejects (Discard)** | 🟨 | Single-scan (`coldroom_bucket` key) + result dialog. Files: `app/(app)/rejects.tsx` + `features/discard/useCreateXfloraDiscardEntry.ts`. Endpoint returns HTTP 200 for both outcomes; branch on `status`/`reason`. No farm gate. **Verify on device:** scan a coldroom bucket → success dialog shows variety/stems/age and auto-dismisses (2.5s); a `Discard` entry is created. A too-young bucket → blocking "Too Young" dialog, no entry created. |
-| 4 | **Shelving** | 🟨 | Sequential dual scan (shelf `shelf` key → bucket `coldroom_bucket` key), 500ms debounce per field, auto-submit `{ farm, shelf_id, bucket_id }`. Only screen with a **farm gate** (`useFarm()` → redirect to `/configure` if unset). Files: `app/(app)/shelving.tsx` + `features/shelving/useCreateXfloraShelvingEntry.ts`. **Verify on device:** configure a farm; scan shelf then bucket → `shelving_entry` succeeds with correct `farm`; shelf persists for batch shelving; bucket field clears + refocuses; a `Shelving` entry appears. |
-| 5 | **Issuing** | ⬜ | Heaviest; needs type-ahead + 3 calls. **Verify on device:** orders load into type-ahead; selecting an order renders its packing list (issued rows greyed); scanning an allocated bucket issues it (`issueBucketToSaleOrderItem`) and the row flips to "Issued"; scanning an unallocated bucket errors. |
+| 4 | **Shelving** | ✅ | Device- + backend-verified: real device scan → `shelving_entry` created **Shelf Item Log 43679** on live Xflora (this flow writes **Shelf Item / Shelf Item Log** + updates the **Coldroom Bucket QR Code** doc — it does **NOT** create a Stock Entry), matching production records from staff. Sequential dual scan (shelf `shelf` key → bucket `coldroom_bucket` key), 500ms debounce/field, auto-submit `{ farm, shelf_id, bucket_id }`; only screen with a **farm gate** (`useFarm()` → `/configure`); shelf persists for batch shelving. Files: `app/(app)/shelving.tsx` + `features/shelving/useCreateXfloraShelvingEntry.ts`. Verify criterion is **success feedback + a Shelf Item Log record** — not a dashboard entry. |
+| 5 | **Issuing** | 🟨 | Heaviest: 3 calls + inline order type-ahead + matched packing-list UI. Files: `app/(app)/issuing.tsx` + `features/issuing/{useXfloraReadySaleOrders,useXfloraReadySaleOrderItems,useIssueFromColdstore}.ts`. Post-issue: **optimistic local flip** on 200 **and** on 409 (self-heals when local state disagrees with the server); local pre-empt skips call C if already issued; legacy-QR `{"<id>":"bucket"}` fallback retained; envelope parsed top-level-first with a `.message` fallback (path logged on first run). **Verify on device:** orders load into type-ahead; selecting an order renders its packing list (issued rows greyed); scanning an allocated bucket issues it and **the row flips to "Issued"** (holds now because of the optimistic update — Flutter itself did not refresh); rescanning it → "already issued" with no round-trip; unallocated bucket errors; confirm the two envelope log lines report `top-level`. |
 
 > Device-verified (all screens): tested on a **physical Android** device (STACK.md primary target) with a **real HID scanner** *and* the camera fallback, against the **live Xflora** instance, confirming the resulting document exists in Frappe — not just a success toast. Sounds/haptics fire on success/error. Continuous-scan screens refocus without manual taps.
 
