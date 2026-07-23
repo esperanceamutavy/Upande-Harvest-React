@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "Upande Harvest",
+    "slug": "xflora-rn",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/upande_logo.png",
+    "scheme": "xflorarn",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./assets/images/upande_logo.png"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/images/upande_logo.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.upande.xflora"
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/upande_logo.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FFFFFF",
+          "android": {
+            "image": "./assets/images/upande_logo.png",
+            "imageWidth": 200
+          }
+        }
+      ],
+      "expo-secure-store",
+      "@sentry/react-native",
+      "expo-audio",
+      "@react-native-community/datetimepicker"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+      }
+    },
+    "owner": "e_a_b123"
+  }
+}
