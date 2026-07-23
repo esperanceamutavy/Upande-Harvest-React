@@ -26,6 +26,19 @@ export interface XfloraReceivingResult {
   message: string;
 }
 
+/** Shelving — POST /api/method/shelving_entry { farm, shelf_id, bucket_id }.
+ *  Sequential dual scan: shelf QR (`shelf` key) then bucket QR (`coldroom_bucket` key).
+ *  `farm` comes from the configured farm (useFarm), not the scan. */
+export interface XfloraShelvingPayload {
+  farm: string;
+  shelfId: string;
+  bucketId: string;
+}
+
+export interface XfloraShelvingResult {
+  message: string;
+}
+
 /** Discard ("Rejects" in the drawer) — POST /api/method/createDiscardEntry { bucket_id }.
  *  The scanned QR carries the id under the `coldroom_bucket` key. The endpoint returns
  *  HTTP 200 for both success and business failures (e.g. an under-age bucket); branch on

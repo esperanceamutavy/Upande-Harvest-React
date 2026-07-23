@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  LayoutGrid,
   PackagePlus,
   Settings,
   Monitor,
@@ -26,8 +27,8 @@ export const WORKFLOW_ITEMS: DrawerItem[] = [
   { label: 'Receiving', icon: PackagePlus, route: '/receiving' },
   { label: 'Rejects', icon: XCircle, route: '/rejects' }, // = coldroom discard flow
   { label: 'Bucket Transfer', icon: ArrowLeftRight, route: '/bucket-transfer' },
+  { label: 'Shelving', icon: LayoutGrid, route: '/shelving' },
   // Uncomment (and import its icon) as each screen is built — build order §7:
-  //   Shelving   → LayoutGrid    → '/shelving'
   //   Issuing    → PackageCheck  → '/issuing'
   //
   // v2 candidates (ship via OTA once spec'd against the live backend — §6):
