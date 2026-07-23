@@ -17,7 +17,7 @@ import { useAuthStore } from '../stores/auth';
 import { useLogout } from '../features/auth/useLogout';
 import { useFarm } from '../features/station/useFarm';
 import { WORKFLOW_ITEMS, UTILITY_ITEMS, type DrawerItem } from '../features/navigation/drawerItems';
-import { colors, fontFamily, radii, spacing } from './ui/theme';
+import { colors, fontFamily, fontSize, radii, spacing } from './ui/theme';
 
 const DRAWER_WIDTH = Math.min(Dimensions.get('window').width * 0.75, 320);
 
@@ -67,7 +67,7 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
         onPress={() => navigate(item.route)}
         style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
       >
-        <Icon size={20} color={colors.primary} />
+        <Icon size={20} color={colors.textSecondary} />
         <Text style={styles.menuLabel}>{item.label}</Text>
       </Pressable>
     );
@@ -106,7 +106,7 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
               <Text style={styles.avatarText}>{initial}</Text>
             </View>
             <Pressable onPress={onClose} hitSlop={8}>
-              <X size={20} color="rgba(255,255,255,0.7)" />
+              <X size={20} color={colors.muted} />
             </Pressable>
           </View>
           <Text style={styles.fullName}>{fullName || 'User'}</Text>
@@ -161,11 +161,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 2, height: 0 },
   },
   header: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.surface,
     paddingHorizontal: spacing.lg,
     paddingTop: 48,
     paddingBottom: spacing.lg,
-    borderBottomRightRadius: radii.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
   headerTop: {
     flexDirection: 'row',
@@ -173,29 +174,30 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.accent,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { fontFamily: fontFamily.bold, fontSize: 22, color: 'white' },
+  avatarText: { fontFamily: fontFamily.bold, fontSize: fontSize.md, color: 'white' },
   fullName: {
-    fontFamily: fontFamily.bold,
-    fontSize: 18,
-    color: 'white',
+    fontFamily: fontFamily.semiBold,
+    fontSize: fontSize.md,
+    color: colors.primary,
     marginTop: spacing.md,
   },
-  emailText: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
+  emailText: { fontFamily: fontFamily.regular, fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 },
   stationCard: {
     marginTop: spacing.sm,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.surfaceAlt,
     borderRadius: radii.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
   },
-  stationText: { fontSize: 12, color: 'rgba(255,255,255,0.85)' },
+  stationText: { fontFamily: fontFamily.medium, fontSize: fontSize.xs, color: colors.textSecondary },
   scroll: { flex: 1, paddingVertical: spacing.xs },
   menuItem: {
     flexDirection: 'row',

@@ -171,7 +171,8 @@ The precondition was **partly already met**. Reading the live Xflora Server Scri
 - **`get_shelf_stem_summary`** → current on-shelf `{ bucket_count, total_stems, variety_count }` (no date filter). Available, not used in v1.
 - **Received** → **`get_receiving_dashboard_data`** `{from_date,to_date}` → `message.total_stems` — a sibling of the shelving endpoint, **being created server-side to match it exactly.** The hook calls it directly (no field-probing); if it lags deployment the tile shows "—". (The opaque `get_dashboard_data` app method is no longer used.)
 - **`getDashboardData`** (camelCase) → an **OPL fulfillment** view (`ready_count`, per-OPL `issuing_percentage`/`packing_percentage`, boxes) — *not* a daily stems total. **Issued-today stems does not exist** as an aggregate → **Issued dropped from v1.**
-- `get_grading_dashboard_data` exists too (grading — not an Xflora mobile flow, unused).
+- `get_grading_dashboard_data` exists too (shelving-style grading detail, unused).
+- **`get_grading_stats`** `{from_date,to_date}` → `message.{ total_stems, total_entries }` [live, added OTA 3] — powers the **Graded** stat tile. Grading remains a **stat only** — not a drawer/tab workflow.
 
 **Decisions (user):** tiles = **Received + Shelved + Bucket Transfer** (Issued dropped); **no breakdown list** in v1 (tiles + quick actions only).
 
@@ -225,7 +226,13 @@ Original plan (for reference):
 9. Online-only data via a TanStack Query hook; skeleton + error/retry states.
 10. Gate: `tsc` clean; typed-routes regen if routes change; device-verify the stats against live Xflora.
 
-**Stat remap summary:** reference `[Hero: Field Harvest] [Received] [Graded] [Rejects]` → Xflora **`[Received] [Shelved] [Issued]`** (+ Rejects/Discard tile optional, since Discard *does* create a Stock Entry). No harvest, no grading.
+**Stat remap summary:** reference `[Hero: Field Harvest] [Received] [Graded] [Rejects]` → Xflora **`[Received (hero)]` + `[Shelved] [Transferred] [Graded]`** (3-across). No field-harvest hero; Issued dropped (no daily-stems aggregate); Graded added in OTA 3 as a stat-only tile.
+
+### OTA 3 — Graded tile + bottom tabs + drawer restyle — 🟨 code-complete (awaiting device check)
+- **Graded tile:** `useDashboardStats` adds a 4th call `get_grading_stats` → `{total_stems, total_entries}`; `DashboardStats` gains `gradedStems`/`gradedEntries`; `StatTile` gains a `sublabel` line and auto-shrinking value (`adjustsFontSizeToFit`). Layout is now **hero Received + a 3-across row (Shelved / Transferred / Graded)**; Graded shows stems big with "N entries" as sublabel. Graded stays **out of the drawer/tabs** (stat only). Per-tile "—" fallback unchanged (errors only if all 4 calls fail).
+- **Bottom tabs:** `src/app/(app)/_layout.tsx` converted from `Stack` to expo-router **`Tabs`**, matching the reference styling on our tokens (icon-only, `tabBarActiveTintColor: primary` / inactive `muted`, `height: 52 + insets.bottom`, surface bg + hairline top border). Five tabs — **Home / Receiving / Bucket Transfer / Shelving / Issuing** (lucide icons matching the drawer). **Rejects, Configure, ERP Desk, stock-entry/[id]** are `href: null` (off the bar; Rejects reachable via drawer + dashboard quick action). Drawer overlay preserved (Modal from the Home header hamburger). No React Navigation.
+- **Drawer restyle:** `AppDrawer` header switched from the dark band to the reference's **light panel** — white header with a hairline bottom border, 44px primary avatar circle + name (Poppins semiBold) + email (DM Sans, textSecondary), farm badge kept (restyled to `surfaceAlt`); nav-row icons → `textSecondary`. Structure/animation unchanged.
+- **Gate met:** `tsc` clean; Metro boot regenerated router types (all routes present, no `kikwetu`); `expo export` (android) bundled reproducibly (exit 0, no fatal errors).
 
 ---
 

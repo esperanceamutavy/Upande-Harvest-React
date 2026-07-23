@@ -31,6 +31,12 @@ function fmt(v: number | null): string {
   return v == null ? '—' : Math.round(v).toLocaleString();
 }
 
+function entriesLabel(entries: number | null): string | undefined {
+  if (entries == null) return undefined;
+  const n = Math.round(entries);
+  return `${n.toLocaleString()} ${n === 1 ? 'entry' : 'entries'}`;
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const fullName = useAuthStore((s) => s.fullName);
@@ -72,7 +78,7 @@ export default function Dashboard() {
           </View>
         ) : (
           <>
-            {/* Stat tiles — Received (hero) + Shelved / Bucket Transfer */}
+            {/* Stat tiles — Received (hero) + Shelved / Transferred / Graded */}
             <StatTile
               hero
               tone="green"
@@ -83,6 +89,13 @@ export default function Dashboard() {
             <View style={styles.row}>
               <StatTile tone="blue" label="SHELVED" value={fmt(data?.shelvedStems ?? null)} unit="stems" />
               <StatTile tone="stone" label="TRANSFERRED" value={fmt(data?.bucketTransferStems ?? null)} unit="stems" />
+              <StatTile
+                tone="stone"
+                label="GRADED"
+                value={fmt(data?.gradedStems ?? null)}
+                unit="stems"
+                sublabel={entriesLabel(data?.gradedEntries ?? null)}
+              />
             </View>
 
             {/* Quick actions — data-driven from the drawer's workflow list */}

@@ -9,12 +9,16 @@ import { apiClient } from '../../lib/api';
 //   - get_receiving_dashboard_data  (Received)         [sibling being created server-side]
 //   - get_shelving_dashboard_data   (Shelved)          [confirmed live]
 //   - get_bucket_transfer_stats     (Bucket Transfer)  [confirmed live]
+//   - get_grading_stats             (Graded)           [live] -> also message.total_entries
+// Grading is a dashboard stat only — it is NOT a drawer/tab workflow.
 // See DESIGN_PORT_PLAN.md §4.
 
 export interface DashboardStats {
   receivedStems: number | null;
   shelvedStems: number | null;
   bucketTransferStems: number | null;
+  gradedStems: number | null;
+  gradedEntries: number | null;
 }
 
 function todayISO(): string {
@@ -38,26 +42,34 @@ async function fetchDashboardStats(): Promise<DashboardStats> {
   const today = todayISO();
   const range = { from_date: today, to_date: today };
 
-  const [received, shelved, transfer] = await Promise.allSettled([
+  const [received, shelved, transfer, graded] = await Promise.allSettled([
     postMessage('get_receiving_dashboard_data', range),
     postMessage('get_shelving_dashboard_data', range),
     postMessage('get_bucket_transfer_stats', range),
+    postMessage('get_grading_stats', range),
   ]);
 
   // If every call failed, surface an error so the screen shows retry.
-  if (received.status === 'rejected' && shelved.status === 'rejected' && transfer.status === 'rejected') {
+  if (
+    received.status === 'rejected' &&
+    shelved.status === 'rejected' &&
+    transfer.status === 'rejected' &&
+    graded.status === 'rejected'
+  ) {
     throw received.reason;
   }
 
-  // All three share the same envelope: message.total_stems. A rejected/lagging call
-  // (e.g. the receiving sibling not yet deployed) leaves that tile at null → "—".
-  const totalStems = (r: PromiseSettledResult<Record<string, unknown> | null>): number | null =>
-    r.status === 'fulfilled' && r.value ? num(r.value.total_stems) : null;
+  // All share the same envelope: message.total_stems (grading adds total_entries).
+  // A rejected/lagging call leaves that tile at null → "—".
+  const field = (r: PromiseSettledResult<Record<string, unknown> | null>, key: string): number | null =>
+    r.status === 'fulfilled' && r.value ? num(r.value[key]) : null;
 
   return {
-    receivedStems: totalStems(received),
-    shelvedStems: totalStems(shelved),
-    bucketTransferStems: totalStems(transfer),
+    receivedStems: field(received, 'total_stems'),
+    shelvedStems: field(shelved, 'total_stems'),
+    bucketTransferStems: field(transfer, 'total_stems'),
+    gradedStems: field(graded, 'total_stems'),
+    gradedEntries: field(graded, 'total_entries'),
   };
 }
 

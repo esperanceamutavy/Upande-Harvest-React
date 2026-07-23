@@ -15,17 +15,27 @@ interface StatTileProps {
   label: string;
   value: string;
   unit?: string;
+  /** Optional second line under the unit (e.g. "120 entries"). */
+  sublabel?: string;
   tone: StatTone;
   /** Full-width emphasis tile (larger number + height). */
   hero?: boolean;
 }
 
-export function StatTile({ label, value, unit, tone, hero }: StatTileProps) {
+export function StatTile({ label, value, unit, sublabel, tone, hero }: StatTileProps) {
   return (
     <View style={[styles.tile, hero && styles.heroTile, { backgroundColor: TONE_BG[tone] }]}>
-      <Text style={styles.chip}>{label}</Text>
-      <Text style={[styles.value, hero && styles.heroValue]}>{value}</Text>
+      <Text style={styles.chip} numberOfLines={1}>{label}</Text>
+      <Text
+        style={[styles.value, hero && styles.heroValue]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.5}
+      >
+        {value}
+      </Text>
       {unit ? <Text style={styles.unit}>{unit}</Text> : null}
+      {sublabel ? <Text style={styles.sublabel}>{sublabel}</Text> : null}
     </View>
   );
 }
@@ -64,5 +74,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: 'rgba(255,255,255,0.5)',
     marginTop: 2,
+  },
+  sublabel: {
+    fontFamily: fontFamily.medium,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 4,
   },
 });
