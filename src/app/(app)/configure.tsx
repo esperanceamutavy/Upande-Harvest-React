@@ -1,18 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { useFarms } from '../../features/station/useFarms';
 import { useFarmStore } from '../../stores/farm';
 import { setStorageItem, STORAGE_KEYS } from '../../lib/storage';
 import { haptics } from '../../lib/haptics';
-import { AppBar } from '../../components/ui/AppBar';
 import { Button } from '../../components/ui/Button';
+import { Card, Notice } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
 import { Picker } from '../../components/ui/Picker';
-import { Pill } from '../../components/ui/Pill';
-import { colors, spacing } from '../../components/ui/theme';
+import { Screen } from '../../components/ui/Screen';
 
 // Xflora config is farm-only — no station/warehouse. Port of the Xflora branch of
 // configure_user_farm_screen.dart (the warehouse typeahead is hidden `if (!isXflora)`
@@ -65,46 +62,26 @@ export default function ConfigureFarm() {
   }, [isSaving, selectedFarm, farms, setFarm, router]);
 
   return (
-    <SafeAreaView style={styles.root}>
-      <AppBar title="Configure Farm" onBack={() => router.back()} />
+    <Screen title="Configure Farm" loading={farmsLoading} onBack={() => router.back()}>
+      {/* Card title = the step, Field label = the input. Card applies the
+          uppercase itself, so titles are written in sentence case. */}
+      <Card title="Select farm">
+        <Field label="Farm">
+          <Picker
+            value={selectedFarm}
+            onValueChange={handleFarmChange}
+            placeholder="Select a farm…"
+            items={farmItems}
+          />
+        </Field>
+      </Card>
 
-      {farmsLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color={colors.primary} size="large" />
-        </View>
-      ) : (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.form}>
-            <Field label="Farm">
-              <Picker
-                value={selectedFarm}
-                onValueChange={handleFarmChange}
-                placeholder="Select a farm…"
-                items={farmItems}
-              />
-            </Field>
+      {validationError ? <Notice tone="danger">{validationError}</Notice> : null}
+      {savedMsg ? <Notice tone="success">Farm saved</Notice> : null}
 
-            {validationError ? <Pill variant="error">{validationError}</Pill> : null}
-            {savedMsg ? <Pill variant="success">Farm saved</Pill> : null}
-
-            <Button onPress={() => void handleSave()} disabled={isSaving}>
-              {isSaving ? 'Saving...' : 'Save'}
-            </Button>
-          </View>
-        </ScrollView>
-      )}
-    </SafeAreaView>
+      <Button onPress={() => void handleSave()} disabled={isSaving}>
+        {isSaving ? 'Saving...' : 'Save'}
+      </Button>
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  scroll: { flex: 1 },
-  content: { padding: spacing.lg, paddingTop: spacing.xl },
-  form: { gap: spacing.lg },
-});

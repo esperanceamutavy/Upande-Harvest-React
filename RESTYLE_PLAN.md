@@ -96,7 +96,11 @@ For each: replace `<SafeAreaView>` + `<AppBar>` + hand-rolled `<ScrollView>` wit
 
 Two notes:
 
-- Packhouse's `Screen` has **no back affordance** — navigation is drawer + tabs, and the header is hamburger-only. Our screens currently pass `onBack={() => router.back()}`. Since all six are tab or drawer destinations rather than pushed routes, dropping back is correct. The one exception is `stock-entry/[id].tsx`, which *is* pushed — it needs a `back` variant of the header.
+- Packhouse's `Screen` has **no back affordance** — navigation is drawer + tabs, and the header is hamburger-only. **We diverge deliberately here:** the reference has no back prop because it has no pushed routes, and we do. `Screen` takes an optional `onBack` that swaps the hamburger for a lucide `ChevronLeft` in the same leading slot; when it is set the drawer is not mounted, since there would be no way to open it.
+
+  `onBack` goes on exactly the four routes registered `href: null` in `(app)/_layout.tsx` — `rejects`, `configure`, `erp-desk`, `stock-entry/[id]`. The five tab destinations (`index`, `receiving`, `bucket-transfer`, `shelving`, `issuing`) stay hamburger-only. Applied to `configure`, `erp-desk`, and `stock-entry/[id]`; `rejects` picks it up when it migrates as Phase 3 step 2.
+
+  Note that `erp-desk` and `stock-entry/[id]` were bare "coming in Phase 6" stubs with no header of any kind, so they were wrapped in `<Screen scroll={false}>` rather than converted.
 - Once all six are migrated, `AppBar.tsx` has no consumers. Delete it in Phase 5, not before.
 
 **Verify:** each screen on a physical device against production before moving to the next. These are live coldroom flows.

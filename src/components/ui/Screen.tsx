@@ -7,9 +7,11 @@
 //     structurally (isOpen/onClose rather than visible/onClose)
 //   - no useTenant() / instanceUrl (hard constraints 4 and 5)
 //
-// The header is hamburger-only, matching the reference — there is deliberately
-// no back affordance. `stock-entry/[id].tsx` is a pushed route and will need a
-// back variant; that is a Phase 3 decision, not this file's problem yet.
+// DIVERGENCE FROM THE REFERENCE: packhouse's Screen has no back prop, because
+// packhouse has no pushed routes — every destination is a drawer or tab target.
+// We do have pushed routes, so `onBack` swaps the hamburger for a ChevronLeft
+// in the same leading slot. Tab destinations stay hamburger-only. See
+// RESTYLE_PLAN.md §5.
 
 import { useState, type ReactNode } from 'react';
 import {
@@ -24,7 +26,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Menu } from 'lucide-react-native';
+import { ChevronLeft, Menu } from 'lucide-react-native';
 
 import { AppDrawer } from '../AppDrawer';
 import { Button } from './Button';
@@ -36,6 +38,11 @@ interface ScreenProps {
   error?: string | null;
   onRetry?: () => void;
   onRefresh?: () => Promise<void> | void;
+  /**
+   * Pushed routes only. Replaces the hamburger with a back chevron in the same
+   * leading slot; the drawer is not mounted. Tab destinations omit this.
+   */
+  onBack?: () => void;
   /** Hides the hamburger and the drawer entirely. The title stays centred. */
   hideMenu?: boolean;
   /** When false the body is a plain flex View instead of a ScrollView. */
@@ -53,6 +60,7 @@ export function Screen({
   error,
   onRetry,
   onRefresh,
+  onBack,
   hideMenu,
   scroll = true,
   contentPadded = true,
@@ -61,6 +69,10 @@ export function Screen({
 }: ScreenProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // A back chevron and a hamburger share one leading slot, so `onBack` wins and
+  // the drawer stays unmounted — there would be no way to open it anyway.
+  const showMenu = !hideMenu && !onBack;
 
   const handleRefresh = onRefresh
     ? async () => {
@@ -121,9 +133,17 @@ export function Screen({
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       {title ? (
         <View style={styles.header}>
-          {hideMenu ? (
-            <View style={styles.menuBtn} />
-          ) : (
+          {onBack ? (
+            <Pressable
+              onPress={onBack}
+              hitSlop={10}
+              style={styles.menuBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <ChevronLeft size={24} color={colors.text} />
+            </Pressable>
+          ) : showMenu ? (
             <Pressable
               onPress={() => setMenuOpen(true)}
               hitSlop={10}
@@ -133,6 +153,8 @@ export function Screen({
             >
               <Menu size={24} color={colors.text} />
             </Pressable>
+          ) : (
+            <View style={styles.menuBtn} />
           )}
           <Text style={styles.title} numberOfLines={1}>
             {title}
@@ -142,7 +164,7 @@ export function Screen({
         </View>
       ) : null}
 
-      {hideMenu ? null : <AppDrawer isOpen={menuOpen} onClose={() => setMenuOpen(false)} />}
+      {showMenu ? <AppDrawer isOpen={menuOpen} onClose={() => setMenuOpen(false)} /> : null}
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
