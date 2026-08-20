@@ -17,15 +17,19 @@ import { Screen } from '../../components/ui/Screen';
 import { colors, radii, spacing } from '../../components/ui/theme';
 import type { GradingEntry } from '../../types/grading';
 
-// Direct-to-Grader grading. Two scans, ONE server call:
+// Grading. Two scans, ONE server call:
 //   1. grader badge → latched locally, no request
 //   2. bunch QR     → mobile_grading_entry, serialized
-// The server resolves the grader's open bucket and reads bunch_size /
-// stem_length off the Bunch QR Code record, so the client sends neither.
 //
-// CONSEQUENCE of having no pre-flight: a grader with no open Receiving Out is
-// not caught at badge scan — the failure surfaces on their FIRST BUNCH SCAN, as
-// the server's error in the danger Notice. Accepted; see RESTYLE_PLAN.md §8.2.
+// The server resolves everything about the bunch off the Bunch QR Code record.
+// It does not resolve a bucket — it never reads bucket_id and never looks at
+// Receiving Out — and it moves stock between two hardcoded warehouses. So there
+// is nothing for the client to pre-fetch and nothing to pre-validate.
+//
+// Failure modes, all surfaced from the server's own message (RESTYLE_PLAN.md
+// §8.2): bunch not found, ALREADY GRADED, employee not found, invalid bunch
+// size. Already-graded is the one a grader actually hits — it is a duplicate
+// scan, not a fault, so it reads as a warning in both the Notice and the log.
 //
 // Deliberately out of scope: sqlite, the sync queue, the stem pool, bouquet
 // grading, bucket balance, rejects.
@@ -34,6 +38,14 @@ const MAX_LOG_ROWS = 12;
 
 type FeedbackMsg = { tone: NoticeTone; text: string };
 type Slot = 'grader' | 'bunch';
+
+// The server's duplicate-scan rejection is
+// "Bunch <id> has already been graded by <name> (<stock entry>)".
+// Substring-matched rather than compared: the message interpolates the grader's
+// name and the Stock Entry id, and Frappe may prefix it on the way out.
+function isAlreadyGraded(message: string): boolean {
+  return message.toLowerCase().includes('already been graded');
+}
 
 export default function GradingScreen() {
   const router = useRouter();
@@ -126,24 +138,26 @@ export default function GradingScreen() {
         grader,
         status: 'success',
         variety: res.variety,
-        stemLength: res.stemLength,
         qty: res.qty,
         message: res.message,
       });
     } catch (e) {
-      // Includes "no open bucket" — without a pre-flight this is where a grader
-      // who has not done Receiving Out finds out. The server's message is more
-      // specific than anything we could synthesise, so pass it through.
+      // The server's message is always more specific than anything we could
+      // synthesise, so it is passed straight through. Real failure modes:
+      // bunch not found, already graded, employee not found, invalid bunch size.
       const message = extractFrappeError(e);
+      const duplicate = isAlreadyGraded(message);
+
       playError();
       haptics.medium();
-      setFeedback({ tone: 'danger', text: message });
+      // A re-scan is a warning, not a fault — it means the bunch is already in
+      // the system, which is a benign outcome for the packer.
+      setFeedback({ tone: duplicate ? 'warn' : 'danger', text: message });
       logEntry({
         bunchId,
         grader,
-        status: 'error',
+        status: duplicate ? 'duplicate' : 'error',
         variety: null,
-        stemLength: null,
         qty: null,
         message,
       });
@@ -289,25 +303,35 @@ export default function GradingScreen() {
   );
 }
 
-// Variety, stem length and qty are all server-resolved — this row is the only
-// place they are visible, since the client never knows them pre-submit.
+// Variety and qty are server-resolved — this row is the only place they are
+// visible, since the client cannot know them before the write.
+//
+// Three states, deliberately: a duplicate scan is the most common non-success
+// outcome and is not a fault, so it reads amber rather than red.
 function EntryRow({ entry }: { entry: GradingEntry }) {
-  const failed = entry.status === 'error';
-  const detail = failed
-    ? entry.message
-    : [entry.variety, entry.stemLength, entry.qty != null ? `${entry.qty} stems` : null]
-        .filter(Boolean)
-        .join(' · ') || entry.message;
+  const tint =
+    entry.status === 'error'
+      ? styles.logError
+      : entry.status === 'duplicate'
+        ? styles.logDuplicate
+        : null;
+
+  const detail =
+    entry.status === 'success'
+      ? [entry.variety, entry.qty != null ? `${entry.qty} stems` : null]
+          .filter(Boolean)
+          .join(' · ') || entry.message
+      : entry.message;
 
   return (
     <View style={styles.logRow}>
       <View style={styles.logHead}>
-        <Text style={[styles.logBunch, failed && styles.logBunchFailed]} numberOfLines={1}>
+        <Text style={[styles.logBunch, tint]} numberOfLines={1}>
           {entry.bunchId}
         </Text>
         <Text style={styles.logTime}>{entry.time}</Text>
       </View>
-      <Text style={[styles.logDetail, failed && styles.logDetailFailed]} numberOfLines={2}>
+      <Text style={[styles.logDetail, tint]} numberOfLines={3}>
         {detail}
       </Text>
     </View>
@@ -352,8 +376,8 @@ const styles = StyleSheet.create({
   },
   logHead: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
   logBunch: { fontSize: 13, fontWeight: '600', color: colors.primary, flexShrink: 1 },
-  logBunchFailed: { color: colors.error },
   logTime: { fontSize: 12, color: colors.muted },
   logDetail: { fontSize: 13, color: colors.textSecondary },
-  logDetailFailed: { color: colors.error },
+  logError: { color: colors.error },
+  logDuplicate: { color: colors.warning },
 });

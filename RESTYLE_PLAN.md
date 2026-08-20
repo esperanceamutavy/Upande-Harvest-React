@@ -203,7 +203,7 @@ This is a correctness requirement, not an optimisation. A grading screen without
 
 Two endpoints this section previously specified are **not part of grading**, for two different reasons:
 
-1. **`upande_harvest.api.get_grader_open_bucket` does not exist on `xflora.upande.com`.** Verified against the site: `upande_harvest.api` contains dashboard functions only, and the short-form endpoints are Server Scripts. Calling it returns `module 'upande_harvest.api' has no attribute 'get_grader_open_bucket'` — the app is installed, the function is not. **Do not work around this client-side.** The server resolves the grader's open bucket during the write, so there is nothing to reimplement.
+1. **`upande_harvest.api.get_grader_open_bucket` does not exist on `xflora.upande.com`.** Verified against the site: `upande_harvest.api` contains dashboard functions only, and the short-form endpoints are Server Scripts. Calling it returns `module 'upande_harvest.api' has no attribute 'get_grader_open_bucket'` — the app is installed, the function is not. **Do not work around this client-side.** And nothing needs reimplementing: grading has no bucket step at all, so there was never anything for this call to contribute.
 2. **`frappe.client.get_value` on `Bunch QR Code` (`getBunchInfo`, `api.ts:467`) is a packing call.** Its only consumer is `XfloraPackingScreen.tsx:199`. Production removed the grading pre-fetch deliberately and left the reason in the source (`GradeScreen.tsx:284-287`):
 
    > *"we no longer pre-fetch bunch_size + stem_length here. The server's Mobile Grading Entry API reads them from the Bunch QR Code directly, so the pre-fetch was a redundant 150-300ms round-trip per scan. Sending empty strings is equivalent for the server."*
@@ -214,29 +214,59 @@ Two endpoints this section previously specified are **not part of grading**, for
 |---|---|---|
 | `mobile_grading_entry` | `{ bucket_id: '', bunch_id, bunch_size: '', farm, grader, qty: 0, stem_length: '', variety: '' }` | `api.ts:446`, `GradeScreen.tsx:281-297` |
 
-Five fields go empty on purpose: `bucket_id` because the server resolves it from the grader, and `bunch_size` / `stem_length` / `variety` / `qty` because the server reads them off the `Bunch QR Code` record.
+Five fields go empty on purpose. `bunch_size` / `stem_length` / `variety` / `qty` because the server reads them off the `Bunch QR Code` record — and **`bucket_id` because it is inert.**
 
-Response: `{ message, stock_entry, variety, source_item, stem_length, qty, bucket_remaining_stems? }` (`types/index.ts:100-110`). It is the **only** source for variety / stem length / qty — the client cannot know them pre-submit — so it drives the entries log.
+**There is no bucket resolution.** The script never reads `bucket_id`, never queries Receiving Out, and never looks for an open bucket. It resolves the bunch off `Bunch QR Code` and moves stock between two hardcoded warehouses:
 
-**Ignore `bucket_remaining_stems`.** Production documents it as unreliable on re-used buckets: it sums every harvest and every bunch the bucket has ever seen with no cycle window, so it floors at 0 (`GradeScreen.tsx:310-316`).
+```
+from: "XFL Receiving Coldstore  - XFL"   →   to: "XFL Graded Sold - XFL"
+```
+
+`bucket_id: ''` is kept in the payload purely to match the legacy shape, which costs nothing. Any earlier claim in this plan that the server "resolves the bucket from the grader" was wrong.
+
+#### Response — FLAT envelope
+
+On success the script sets four **top-level siblings** on `frappe.response`, and `message` is a plain string:
+
+```
+{ message: "Grading entry submitted successfully",
+  stock_entry: "MAT-STE-…", qty: 10, variety: "Athena-35CM" }
+```
+
+**There is no nested `message` object.** Unwrapping `body.message ?? body` — the pattern the other Xflora endpoints need — resolves to that string here and makes every field read back `undefined`. That shipped as a defect once; the entries log rendered "Bunch graded" with no variety or stem count. Read the top level directly.
+
+**`stem_length` is not returned.** The response carries only `variety` and `qty`, so `GradingResult` does not declare a stem length rather than surfacing a permanently-null field.
+
+**`bucket_remaining_stems` is not returned either**, and would be ignored regardless — production documents it as unreliable on re-used buckets, since it sums every harvest and every bunch the bucket has ever seen with no cycle window and so floors at 0 (`GradeScreen.tsx:310-316`).
+
+On failure the script sets `http_status_code: 500` with `message` = the exception text, which `extractFrappeError` already reads correctly.
+
+#### Real failure modes
+
+There are four, all surfaced from the server's own message:
+
+| Failure | Server message | Notes |
+|---|---|---|
+| **Already graded** | `Bunch <id> has already been graded by <name> (<stock entry>)` | **The one a grader will actually hit.** Duplicate scan, resolved by the guard on `Stock Entry` where `stock_entry_type = 'Grading'`, `custom_bunch_id = <id>`, `docstatus = 1`. |
+| Bunch not found | `Bunch <id> not found` | No `Bunch QR Code` record. See the self-heal note below. |
+| Employee not found | `Employee <grader> does not exist` | The badge value must be an `Employee` name. |
+| Invalid bunch size | `Invalid bunch size: '<raw>'` | `bunch_size` on the record has no digits in it. |
+
+**Already-graded is a warning, not an error.** It means the bunch is already in the system — a benign outcome for the packer, and materially different from a hard failure. The client substring-matches `already been graded` and renders it as a `warn` `Notice` plus an amber log row, reserving red for the other three. Substring, not equality: the message interpolates a name and a document id.
+
+There is also a **self-heal path** in the script for bunch numbers `20099–20826`, a 2026-07-17 label-printing gap where labels were issued but `Bunch QR Code` records never created. Within that range only, the script will create the record from `variety` + `bunch_size` supplied in the payload. **We send those empty, so the self-heal cannot fire for us** — a bunch in that range will report "not found". Worth knowing if such a label surfaces in the coldroom; it is not worth pre-populating the fields for, since the range is closed and historical.
 
 **No client-side `item_group` derivation and no lockout window.** Any `Grader3` / `SPRAY` substring / 100-second lockout / `DATE_SUB` vs `add_to_date` UTC-vs-EAT note is **Kikwetu's and has been deleted from this plan.** Do not reintroduce it.
 
 **Out of scope:** sqlite, the sync queue, the stem pool (`addToPool` / `gradeFromPool` / `getPoolStatus`), bouquet grading, bucket balance, rejects.
-
-#### Accepted consequence — first-scan failure, not badge-scan failure
-
-Without a pre-flight there is no point at which the client can check whether a grader has an open Receiving Out. **A grader who has not done Receiving Out is therefore not caught when their badge is scanned — they find out on their FIRST BUNCH SCAN**, when `mobile_grading_entry` rejects the write.
-
-This is accepted. The server's error is more specific than anything the client could synthesise, and it surfaces through the `danger` `Notice`, which already works. The cost is one wasted bunch scan per mis-sequenced grader; the alternative was a call that does not exist.
 
 #### As built
 
 `src/app/(app)/grading.tsx`, drawer-only (`href: null`), plus `features/grading/{gradingQr,useSubmitGrading}.ts`, `types/grading.ts`, `lib/serializeByKey.ts`.
 
 - **Two scans, one request.** Badge scan latches the grader **locally, with no network call**. Bunch scans then submit one request each. The grader stays latched across bunches, so a whole bucket is graded on one badge scan; "Change grader" clears it.
-- **No resolved-bucket card.** The bucket cannot be known before the first submit, so nothing about it is displayed. Server-resolved variety / stem length / qty appear in the entries log *after* each write instead.
-- **Entries log** (`This session`, capped at 12 rows, newest first) records **failures as well as successes**. A rejected scan is the packer's cue to re-scan and is easy to miss if its only trace is a `Notice` that the next scan overwrites.
+- **No bucket displayed anywhere.** There is no bucket in this flow — see above. Server-resolved variety and qty appear in the entries log after each write.
+- **Entries log** (`This session`, capped at 12 rows, newest first) records **all three outcomes**: success, duplicate (amber), error (red). A rejected scan is the grader's cue to re-scan and is easy to miss if its only trace is a `Notice` that the next scan overwrites.
 - **QR routing is type-aware.** `detectGradingQrType` ports the legacy JSON-key and string-prefix detection, so a badge scanned into the bunch field re-latches the grader instead of being submitted as a bunch. Bucket-type QRs are rejected with the Direct-to-Grader message, as in the reference.
 - **Writes are serialized** through `serializeByKey('grading', …)` — §8.1. Lives in `lib/serializeByKey.ts`, not `lib/api.ts` (constraint 3).
 
