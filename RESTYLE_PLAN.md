@@ -118,6 +118,12 @@ Then backfill only what the screens actually need — resist porting all twelve.
 - `index.tsx:72` `ActivityIndicator color={colors.accent}` → `colors.text`.
 - Delete `colors.accent` from `theme.ts`. `npx tsc --noEmit` is the proof.
 - Delete `AppBar.tsx`.
+- **Remove the Phase 2 `ui-preview` harness — all three pieces:**
+  1. the route file `src/app/(app)/ui-preview.tsx`
+  2. its `<Tabs.Screen name="ui-preview" options={{ href: null }} />` entry in `src/app/(app)/_layout.tsx`
+  3. the `{ label: 'UI Preview', icon: LayoutGrid, route: '/ui-preview' }` row in `WORKFLOW_ITEMS` in `src/features/navigation/drawerItems.ts`
+
+  Missing (2) leaves a `Tabs.Screen` pointing at a route that no longer exists; missing (3) leaves a dead drawer row that throws on tap. Deleting only the file is not enough.
 
 ## 8. Phase 6 — Grading and Packing
 

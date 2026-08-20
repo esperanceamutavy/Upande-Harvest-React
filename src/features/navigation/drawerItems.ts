@@ -30,6 +30,8 @@ export const WORKFLOW_ITEMS: DrawerItem[] = [
   { label: 'Bucket Transfer', icon: ArrowLeftRight, route: '/bucket-transfer' },
   { label: 'Shelving', icon: LayoutGrid, route: '/shelving' },
   { label: 'Issuing', icon: PackageCheck, route: '/issuing' },
+  // TEMPORARY — Phase 2 device-verification entry point. Delete in Phase 5.
+  { label: 'UI Preview', icon: LayoutGrid, route: '/ui-preview' },
   //
   // v2 candidates (ship via OTA once spec'd against the live backend — §6):
   //   Grading → Hexagon → '/grading'

@@ -6,7 +6,13 @@
 // tab group — which is the point: the footer demo has to be judged with the
 // bottom tab bar actually present.
 //
-// DELETE THIS FILE IN PHASE 5, along with its _layout.tsx entry.
+// PHASE 5 CLEANUP — three things to delete, not one:
+//   1. this file, src/app/(app)/ui-preview.tsx
+//   2. its <Tabs.Screen name="ui-preview" href={null} /> entry in
+//      src/app/(app)/_layout.tsx
+//   3. the { label: 'UI Preview', … } row in
+//      src/features/navigation/drawerItems.ts (WORKFLOW_ITEMS)
+// Also listed in RESTYLE_PLAN.md §7 in case this file is read in isolation.
 
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
