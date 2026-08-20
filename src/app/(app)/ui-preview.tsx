@@ -16,10 +16,12 @@
 
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { QrCode } from 'lucide-react-native';
 
 import { Button } from '../../components/ui/Button';
 import { Card, Notice } from '../../components/ui/Card';
 import { Screen } from '../../components/ui/Screen';
+import { Segmented } from '../../components/ui/Segmented';
 import { colors, fontFamily, fontSize, radii, spacing, typography } from '../../components/ui/theme';
 
 const DEMOS = ['default', 'loading', 'error', 'refresh', 'no-scroll', 'footer'] as const;
@@ -31,6 +33,7 @@ export default function UiPreview() {
   // packhouse reference (hairline top border) — simulated inside the slot so
   // both can be compared on-device without changing Screen's API.
   const [refFooter, setRefFooter] = useState(false);
+  const [seg, setSeg] = useState<'standard' | 'bunched' | 'partial'>('standard');
 
   const picker = (
     <View style={styles.picker}>
@@ -146,6 +149,30 @@ export default function UiPreview() {
         <Notice tone="danger">Danger — no farm configured. Set one in Configure first.</Notice>
       </Card>
 
+      <Card title="Buttons">
+        <View style={styles.stack}>
+          <Button label="Primary" onPress={() => {}} />
+          <Button label="Outline" variant="outline" onPress={() => {}} />
+          <Button label="Ghost" variant="ghost" onPress={() => {}} />
+          <Button label="With icon" iconLeft={QrCode} onPress={() => {}} />
+          <Button label="Loading" loading onPress={() => {}} />
+          <Button label="Disabled" disabled onPress={() => {}} />
+          <Button onPress={() => {}}>Legacy children API</Button>
+        </View>
+      </Card>
+
+      <Card title="Segmented">
+        <Segmented
+          value={seg}
+          options={[
+            { value: 'standard', label: 'Standard' },
+            { value: 'bunched', label: 'Bunched' },
+            { value: 'partial', label: 'Partial' },
+          ]}
+          onChange={setSeg}
+        />
+      </Card>
+
       <Card title="Header checks">
         <Text style={styles.body}>
           Title centred, hamburger left, symmetric spacer right. Tap the hamburger — AppDrawer
@@ -180,6 +207,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   tall: { height: 400 },
+  stack: { gap: spacing.sm },
 
   // Redraws the reference footer's hairline at exactly the position Screen's
   // own borderTop would occupy, cancelling the slot padding to reach the edges.

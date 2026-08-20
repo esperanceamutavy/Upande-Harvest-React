@@ -10,6 +10,7 @@ import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOve
 import { Card, Notice, type NoticeTone } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
 import { Screen } from '../../components/ui/Screen';
+import { Segmented } from '../../components/ui/Segmented';
 import { colors, radii, spacing } from '../../components/ui/theme';
 
 const ACCENT = colors.accent;
@@ -18,6 +19,18 @@ const ACCENT = colors.accent;
 const BUNCH_SIZES = [5, 7, 9, 10, 13] as const;
 
 type FeedbackMsg = { tone: NoticeTone; text: string };
+
+// Bunched and partial-bucket were two checkboxes that disabled each other —
+// i.e. a three-state single-select wearing two booleans. Segmented states the
+// exclusivity directly. Batch receiving stays a separate checkbox because it is
+// orthogonal: it composes with all three modes.
+type ReceivingMode = 'standard' | 'bunched' | 'partial';
+
+const MODE_OPTIONS = [
+  { value: 'standard', label: 'Standard' },
+  { value: 'bunched', label: 'Bunched' },
+  { value: 'partial', label: 'Partial' },
+] as const satisfies readonly { value: ReceivingMode; label: string }[];
 
 function isValidJson(text: string): boolean {
   try {
@@ -44,11 +57,13 @@ export default function ReceivingScreen() {
   const [bucketInput, setBucketInput] = useState('');
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
-  const [isBunched, setIsBunched] = useState(false);
+  const [mode, setMode] = useState<ReceivingMode>('standard');
   const [selectedBunchSize, setSelectedBunchSize] = useState<number | null>(null);
   const [quantity, setQuantity] = useState('');
-  const [isPartial, setIsPartial] = useState(false);
   const [overrideQty, setOverrideQty] = useState('');
+
+  const isBunched = mode === 'bunched';
+  const isPartial = mode === 'partial';
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackMsg | null>(null);
   const [scannerVisible, setScannerVisible] = useState(false);
@@ -182,26 +197,14 @@ export default function ReceivingScreen() {
     textInputRef.current?.focus();
   }
 
-  function toggleBunched() {
-    if (isPartial) return; // mutually exclusive with partial-bucket override
-    setIsBunched((prev) => {
-      const next = !prev;
-      if (!next) {
-        setSelectedBunchSize(null);
-        setQuantity('');
-      }
-      return next;
-    });
-    textInputRef.current?.focus();
-  }
-
-  function togglePartial() {
-    if (isBunched) return; // mutually exclusive with bunched
-    setIsPartial((prev) => {
-      const next = !prev;
-      if (!next) setOverrideQty('');
-      return next;
-    });
+  // Leaving a mode clears its inputs, matching the old toggles' behaviour.
+  function changeMode(next: ReceivingMode) {
+    setMode(next);
+    if (next !== 'bunched') {
+      setSelectedBunchSize(null);
+      setQuantity('');
+    }
+    if (next !== 'partial') setOverrideQty('');
     textInputRef.current?.focus();
   }
 
@@ -222,37 +225,9 @@ export default function ReceivingScreen() {
             </View>
           </Pressable>
 
-          {/* Is Bunched toggle — disabled while partial-bucket override is active */}
-          <Pressable
-            onPress={toggleBunched}
-            disabled={isPartial}
-            style={[styles.toggleRow, isPartial && styles.toggleRowDisabled]}
-          >
-            <View style={[styles.checkbox, isBunched && styles.checkboxChecked]}>
-              {isBunched ? <Check size={14} color="white" /> : null}
-            </View>
-            <View style={styles.toggleLabels}>
-              <Text style={styles.toggleLabel}>Is Bunched</Text>
-              <Text style={styles.toggleHint}>{isBunched ? 'Bunched' : 'Not bunched'}</Text>
-            </View>
-          </Pressable>
-
-          {/* Partial bucket override toggle — disabled while bunched is active */}
-          <Pressable
-            onPress={togglePartial}
-            disabled={isBunched}
-            style={[styles.toggleRow, isBunched && styles.toggleRowDisabled]}
-          >
-            <View style={[styles.checkbox, isPartial && styles.checkboxChecked]}>
-              {isPartial ? <Check size={14} color="white" /> : null}
-            </View>
-            <View style={styles.toggleLabels}>
-              <Text style={styles.toggleLabel}>Partial bucket (override qty)</Text>
-              <Text style={styles.toggleHint}>
-                {isPartial ? `Override: ${overrideQty || '—'} stems` : 'Record full bucket qty'}
-              </Text>
-            </View>
-          </Pressable>
+          <Field label="Bucket mode">
+            <Segmented value={mode} options={MODE_OPTIONS} onChange={changeMode} />
+          </Field>
         </View>
       </Card>
 
@@ -372,7 +347,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkboxChecked: { backgroundColor: ACCENT, borderColor: ACCENT },
-  toggleRowDisabled: { opacity: 0.4 },
   toggleLabels: { flex: 1, gap: 2 },
   toggleLabel: { fontSize: 14, fontWeight: '600', color: colors.primary },
   toggleHint: { fontSize: 12, color: colors.muted },

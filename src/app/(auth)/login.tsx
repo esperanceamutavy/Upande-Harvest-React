@@ -124,9 +124,7 @@ export default function LoginScreen() {
 
             {error ? <Pill variant="error">{error}</Pill> : null}
 
-            <Button onPress={onSubmit} disabled={isLoading}>
-              {isLoading ? 'Please wait...' : 'Log In'}
-            </Button>
+            <Button label="Log In" loading={isLoading} onPress={onSubmit} />
 
             <View style={styles.footer}>
               <Text style={styles.footerText}>Powered by:</Text>

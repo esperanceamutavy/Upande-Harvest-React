@@ -1,0 +1,131 @@
+// Segmented — pill-shaped single-select with a spring-animated indicator.
+// Port of packhouse's src/core/ui/Segmented.tsx.
+//
+// ONE DEVIATION: the reference hard-codes `marginBottom: spacing.md` on the
+// container. Ours does not — every consumer here sits inside a <Card> whose
+// content is already gap-spaced, so a baked-in margin would double up. Callers
+// that need spacing pass `style`.
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Animated,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+  type ViewStyle,
+} from 'react-native';
+
+import { borderRadius, colors, fontFamily, fontSize } from './theme';
+
+interface SegmentedOption<T extends string> {
+  value: T;
+  label: string;
+}
+
+interface SegmentedProps<T extends string> {
+  value: T;
+  options: readonly SegmentedOption<T>[];
+  onChange: (next: T) => void;
+  style?: ViewStyle;
+}
+
+export function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  style,
+}: SegmentedProps<T>) {
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  const activeIndex = useMemo(
+    () => Math.max(0, options.findIndex((o) => o.value === value)),
+    [value, options],
+  );
+
+  const PADDING = 4;
+  const innerWidth = Math.max(0, containerWidth - PADDING * 2);
+  const segmentWidth = options.length > 0 ? innerWidth / options.length : 0;
+  const anim = useRef(new Animated.Value(activeIndex)).current;
+
+  useEffect(() => {
+    Animated.spring(anim, {
+      toValue: activeIndex,
+      useNativeDriver: true,
+      friction: 8,
+      tension: 60,
+    }).start();
+  }, [activeIndex, anim]);
+
+  const onLayout = (e: LayoutChangeEvent) => setContainerWidth(e.nativeEvent.layout.width);
+
+  return (
+    <View style={[styles.container, style]} onLayout={onLayout}>
+      {segmentWidth > 0 ? (
+        <Animated.View
+          style={[
+            styles.indicator,
+            {
+              width: segmentWidth,
+              transform: [
+                {
+                  translateX: anim.interpolate({
+                    inputRange: options.map((_, i) => i),
+                    outputRange: options.map((_, i) => i * segmentWidth),
+                  }),
+                },
+              ],
+            },
+          ]}
+        />
+      ) : null}
+
+      {options.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <Pressable
+            key={opt.value}
+            onPress={() => onChange(opt.value)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            style={styles.btn}
+          >
+            <Text style={[styles.label, active && styles.labelActive]} numberOfLines={1}>
+              {opt.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: borderRadius.full,
+    padding: 4,
+    position: 'relative',
+  },
+  indicator: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    left: 4,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  btn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 9,
+    zIndex: 1,
+  },
+  label: { fontFamily: fontFamily.medium, fontSize: fontSize.sm, color: colors.textMuted },
+  labelActive: { fontFamily: fontFamily.semiBold, color: colors.text },
+});

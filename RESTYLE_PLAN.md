@@ -113,7 +113,17 @@ Upgrade `src/components/ui/Button.tsx` to the packhouse contract: `borderRadius.
 
 The current API takes `children`; packhouse takes `label`. Support both during migration (`label?: string; children?: ReactNode`) so the migrated screens don't all have to change in the same commit.
 
-Then backfill only what the screens actually need — resist porting all twelve. `Segmented` (Receiving's single/batch/bunched mode switch is hand-rolled today), `ProgressBar`, `Toast`, and `OfflineBanner` are the ones that pay for themselves. `Dropdown` overlaps our existing `Picker` — compare before porting, don't end up with both.
+Then backfill only what the screens actually need — resist porting all twelve. `Dropdown` overlaps our existing `Picker` — compare before porting, don't end up with both.
+
+**Backfill decisions, after auditing the five migrated screens:**
+
+| Primitive | Verdict | Reason |
+|---|---|---|
+| `Segmented` | **ported** | Receiving's `Is Bunched` / `Partial bucket` were two checkboxes that disabled each other — a three-state single-select wearing two booleans. Now one `Segmented` over `standard \| bunched \| partial`. **Batch Receiving stays a checkbox**: it is orthogonal and composes with all three modes, so the plan's original "single/batch/bunched" framing was wrong. |
+| `ProgressBar` | deferred | No consumer among the five. Its natural home is Packing's `N/250` stem cap (§8.3) — port it in Phase 6, against a real use. |
+| `Toast` | rejected | Every migrated screen already reports through an inline `<Notice>` anchored next to the control that produced it. Adding a second, transient channel would split feedback across two idioms and make scan errors easier to miss — a regression in a flow where the packer is looking at the field, not the top of the screen. |
+| `OfflineBanner` | **blocked by hard constraints** | Requires `expo-network` (a native module → breaks constraint 6, no longer OTA-shippable) **and** consecutive-API-failure counters wired into the HTTP client (`packhouse/src/core/network/store.ts`), which means editing `src/lib/api.ts` → constraint 3. Not portable without breaking two constraints. Revisit only if a new build is on the table anyway. |
+| `Dropdown` | rejected | `Picker` already covers every call site. Porting it would leave two overlapping select components. |
 
 ## 7. Phase 5 — cleanup
 

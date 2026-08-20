@@ -9,9 +9,10 @@
 // AppDrawer.tsx already uses for the logout confirm, and which the screens
 // migrated in Phase 3 use too.
 //
-// Icons are lucide per hard constraint 1. Note that lucide 1.x renamed the
-// icons packhouse used: there is no AlertTriangle/AlertCircle/CheckCircle2 any
-// more, they are TriangleAlert/CircleAlert/CircleCheck.
+// Icons are lucide per hard constraint 1. lucide 1.x renamed these icons to
+// TriangleAlert / CircleAlert / CircleCheck; the old AlertTriangle /
+// AlertCircle / CheckCircle2 names still resolve as back-compat aliases, but
+// new code uses the current names.
 
 import { type ReactNode } from 'react';
 import { StyleSheet, Text, View, type ViewStyle } from 'react-native';

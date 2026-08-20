@@ -79,9 +79,7 @@ export default function ConfigureFarm() {
       {validationError ? <Notice tone="danger">{validationError}</Notice> : null}
       {savedMsg ? <Notice tone="success">Farm saved</Notice> : null}
 
-      <Button onPress={() => void handleSave()} disabled={isSaving}>
-        {isSaving ? 'Saving...' : 'Save'}
-      </Button>
+      <Button label="Save" loading={isSaving} onPress={() => void handleSave()} />
     </Screen>
   );
 }
