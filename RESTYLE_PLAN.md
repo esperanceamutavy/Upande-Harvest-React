@@ -185,7 +185,7 @@ Three behaviours the correctness rules depend on are therefore **snapshot-source
 | Behaviour | Depended on by | Risk if it has drifted |
 |---|---|---|
 | The ungraded-bunch `frappe.throw` | **Rule 2** | If it no longer throws, one-bunch-per-scan is merely tidier, not corrective — and ungraded bunches may pack silently. |
-| The `item_locations[0]` warehouse fallback | **Rule 3** | If it now errors instead of falling back, Rule 3 is defence-in-depth rather than the only guard. If it still falls back, Rule 3 is load-bearing. |
+| The `item_locations[0]` warehouse fallback | **Rule 3** | If it now errors instead of falling back, Rule 3 is defence-in-depth rather than the only guard. If it still falls back, Rule 3 is load-bearing. (The `uom`-format half of this is resolved live — see §8.3.) |
 | The `frappe.response['data']` envelope | **the packing client's ability to read any response** | Wrong guess here means every successful pack looks like a parse failure. Cheapest of the three to confirm — one real call shows it. |
 
 **Confirm all three with one authenticated call each before the packing screen is trusted in the field.** A single successful pack against a live OPL settles the envelope; a deliberately ungraded bunch settles Rule 2; a deliberate wrong-variety scan settles Rule 3. That is three scans, and it is the difference between a spec and a guess.
@@ -392,28 +392,53 @@ GET /api/resource/Sales Order/<name>          — or frappe.client.get
 
 **Do not amend `get_sales_order_lines`.** It does not select the pack fields, and it does not need to; the resource read returns the whole document including children.
 
-**`Sales Order Item`** — one row per variety/length, each with its own OPL:
+**`Sales Order Item`** — one row per variety, each pointing at an OPL:
 
 | Field | Example | Use |
 |---|---|---|
-| `item_code` | `Confidential-50CM` | the variety. **Stem length is baked into the code.** |
-| `custom_packrate` | `140` | **stems per box** — the Rule 1 cap |
-| `custom_number_of_boxes` | `2` | **total boxes** for this line |
+| `item_code` | `Confidential-50CM` | the variety |
+| `custom_packrate` | `140` (Int) | stems per box |
+| `custom_number_of_boxes` | `2` | boxes for this line |
 | `custom_opl` | `OPL-2026-02904` | the OPL this line packs against |
-| `qty` | `280` | total stems ordered on the line |
-| `stock_uom` | `Stems` | confirms `qty` and `custom_packrate` share a unit |
+| `qty` | `280` | stems ordered on the line |
+| `stock_uom` | `Stems` | unit of `qty` |
 
 **`Sales Order`** (parent) — `customer`, `custom_farm`, `custom_box_type`, `custom_bunching` (`X10`), `custom_total_boxes`.
 
-#### STRUCTURAL — one OPL per line item
+#### ✅ Read the packing parameters from the OPL, not the Sales Order
 
-**Each `Sales Order Item` carries its own `custom_opl`.** An OPL is therefore a single variety at a single length, and since length is baked into `item_code`, one OPL means exactly one `item_code`.
+**The OPL's own `Pick List Item` rows carry everything the session needs**, so the packing screen never has to fetch the Sales Order at all. Confirmed on two live OPLs:
 
-This is the load-bearing fact for the whole screen:
+| Field | `OPL-2026-02914` | `OPL-2026-02172` | Notes |
+|---|---|---|---|
+| `custom_packrate` | `"495"` | `"312"` | **string here, not Int — parse it.** (`Sales Order Item.custom_packrate` is an Int; the OPL copy is a string. Same meaning, different type.) |
+| `custom_total_stems` | `"1485"` | `"936"` | string too |
+| rows | 15 | 10 | **row count, NOT box count** |
+| boxes | `1485 / 495` = **3** | `936 / 312` = **3** | |
+| `item_locations[*].uom` | `Bunch(10)` on all 15 | `Bunch(12)` on all 10 | one size per OPL |
+| stem lengths | `50CM` ×14, `60CM` ×1 | `60CM` / `70CM` / `80CM` | **several per OPL** |
 
-- **The packing screen scopes to one OPL**, which fixes `item_code`, `custom_packrate` and `custom_number_of_boxes` for the entire session. There is no per-scan variety ambiguity to resolve.
-- **Single-variety is structural, not a convention** the client upholds. See the mix note below, which this supersedes.
-- Everything Rule 1 and Rule 3 need is known the moment an OPL is chosen — before the first bunch is scanned.
+Prefer the OPL values: one fetch instead of two, and they are the rows the server matches against.
+
+#### ⛔ `custom_box_id` is a ROW IDENTIFIER, not a box number
+
+**`OPL-2026-02914` has 15 rows numbered 1–15 but only 3 boxes** (`1485 / 495`). `OPL-2026-02172` has 10 rows and 3 boxes. The numbers do not correspond and never will.
+
+**Any earlier claim that box numbers are pre-assigned on the OPL is deleted.** They are not assigned anywhere. **The client owns box numbering** — start at `1`, increment when the Rule 1 cap would be exceeded, stop at `M`. Reading `custom_box_id` as a box number would produce 15 boxes for a 3-box order.
+
+#### STRUCTURAL — what an OPL actually is
+
+**One OPL = one variety (`item_code`), one bunch size (`uom`), MANY stem lengths.**
+
+Corrected: this section previously said "a single variety at a single length" and claimed length was baked into `item_code`. The live data refutes the length half — `OPL-2026-02914` carries `50CM` and `60CM` rows under the same `item_code`, and `OPL-2026-02172` spans `60/70/80CM`.
+
+What that fixes for the screen:
+
+- **Choosing an OPL fixes `item_code`, `custom_packrate`, `custom_total_stems` and the bunch size** for the whole session. Those need reading once.
+- **It does not fix stem length.** Length varies per scan and must be carried per bunch — see Rule 3, which now needs two comparisons rather than one.
+- Single-*variety* remains structural. Single-*length* was never true.
+
+> **Open question — how is `item_code` versus length actually related?** The Sales Order Item example is `Confidential-50CM`, which looks like it encodes a length; yet an OPL keeps one `item_code` across `50CM` and `60CM` rows. Either the OPL's `item_code` is variety-only and the Sales Order's is not, or the suffix is a naming convention that does not track `custom_stem_length`. **Do not rely on parsing a length out of `item_code`.** Read `custom_stem_length` as its own field, always.
 
 #### Rule 1 — pack rate cap. Client-side; the server has no cap at all.
 
@@ -430,24 +455,60 @@ The script computes `number_of_stems` identically and throws `Invalid bunch size
 
 **Field name is `custom_packrate`, not `custom_pack_rate`** — the obvious guess is wrong. `xflora_set_so_item_pack_fields` is the desk-side *writer* of it (run after `update_child_qty_rate`, also maintaining `custom_number_of_boxes` and the parent's `custom_total_boxes`); it is not a read path.
 
-**The arithmetic closes.** `qty / custom_packrate = custom_number_of_boxes` — `280 / 140 = 2`. So one OPL gives both bounds:
+**✅ CONFIRMED on two live OPLs. Both bounds come from the OPL:**
 
-- **per-box cap** = `custom_packrate` → when the incoming bunch would exceed it, increment `box_id` and start the next box
-- **total boxes** = `custom_number_of_boxes` → the session is complete when box `M` fills
+```
+capPerBox = parseInt(custom_packrate)                        // "495" → 495
+boxCount  = parseInt(custom_total_stems) / capPerBox         // 1485 / 495 = 3
+```
 
-**Render "Box N of M", and stop at M.** Past `custom_number_of_boxes` the line is fully packed and further scans should be refused client-side — the server will not refuse them, and there is no `box_id` value that means "invalid".
+`OPL-2026-02914`: `1485 / 495` = **3**. `OPL-2026-02172`: `936 / 312` = **3**.
+
+Both fields are **strings** on `Pick List Item` — parse before dividing, or `"1485" / "495"` silently coerces and `"1485" + …` does not.
+
+*Superseded:* the previous formula was `qty / custom_packrate = custom_number_of_boxes` off `Sales Order Item` (`280 / 140 = 2`). Still arithmetically true, but it needs a second fetch and — critically — `qty` on `Pick List Item` means something different (see below). Use `custom_total_stems`.
+
+**Render "Box N of M", and refuse scans past M.** The server has no cap, no box count, and no `box_id` value meaning "invalid", so past box `M` the client is the only thing that can stop a scan.
+
+#### ⚠️ `qty` on `Pick List Item` is BUNCHES, and can be FRACTIONAL
+
+Not stems. And not whole:
+
+| OPL | `qty` | uom | stems |
+|---|---|---|---|
+| `OPL-2026-02172` | `8.333333333` | `Bunch(12)` | 100 |
+| — | `8.5` | `Bunch(10)` | 85 |
+
+**Do not assume whole bunches, and do not use `qty` in the box arithmetic.** Two consequences:
+
+- **Box math uses `custom_total_stems`**, which is already in stems and integral. Deriving stems as `qty × stems_per_bunch` invites float error — `8.333333333 × 12 = 99.999999996`, and comparing that to a cap gives an off-by-one at the boundary.
+- A fractional `qty` means the order genuinely expects a **partial bunch**. We submit `bunch_qty: 1` per scanned bunch, so the client's running stem total advances in whole-bunch steps and can never land exactly on a fractional target. Expect the last box of such an OPL to be short by design; do not treat that as a cap failure or block on it.
 
 #### Rule 3 — variety mismatch. CORRECTNESS REQUIREMENT, same tier as Rule 2.
 
-> 🟡 **Snapshot-sourced (~27 July 2026), pending live confirmation** (§8.0). Confirm by scanning a deliberate wrong-variety bunch against a test OPL. Either answer keeps the rule: if the fallback still fires, Rule 3 is the only guard against silent misallocation; if the server now errors instead, Rule 3 becomes defence-in-depth and a faster local rejection. **Implement it either way** — the cost is one string comparison.
+> 🟡 **Snapshot-sourced (~27 July 2026), pending live confirmation** (§8.0). Confirm by scanning a deliberate wrong-variety bunch against a test OPL. Either answer keeps the rule: if the fallback still fires, Rule 3 is the only guard against silent misallocation; if the server now errors instead, Rule 3 becomes defence-in-depth and a faster local rejection. **Implement it either way.**
 
 The script resolves `source_warehouse` by matching `item_code` + `custom_stem_length` + `uom` against `order_pick_list.item_locations`, and **on no match falls back to `item_locations[0].warehouse` with no error and no mention in the response.**
 
 **A bunch of the wrong variety therefore packs successfully, into the wrong warehouse, silently.** Stock lands in the wrong place, the Farm Pack List looks correct, and nothing in the response says otherwise. This is worse than a rejection: it is invisible.
 
-**The client MUST reject a scanned bunch whose `Bunch QR Code.item_code` differs from the OPL's `item_code`, before posting.** Since the OPL fixes exactly one `item_code` (see above), this is a straight string comparison available on every scan with no extra round-trip beyond the bunch lookup already needed for `bunch_uom`.
+**The client MUST reject a scanned bunch that does not match a row on the OPL, before posting.** No extra round-trip is needed: the `Bunch QR Code` lookup already required for `bunch_uom` returns both fields.
 
-Note that because stem length is baked into `item_code` (`Confidential-50CM`), matching `item_code` implicitly matches length — one comparison covers both dimensions the script checks.
+**⚠️ TWO dimensions, checked separately. An `item_code` match is NOT enough.**
+
+Corrected: this previously said length was baked into `item_code`, so one comparison covered both. **False.** A single OPL carries several stem lengths under one `item_code` — `OPL-2026-02914` is `50CM` ×14 plus `60CM` ×1; `OPL-2026-02172` spans `60/70/80CM`. Matching only `item_code` would let a 60CM bunch pass into a 50CM row's slot and pick up the fallback warehouse.
+
+The check is therefore against the OPL's `item_locations`, on **both** fields:
+
+```
+accept only if some row in item_locations satisfies
+    row.item_code           === bunch.item_code
+AND row.custom_stem_length  === bunch.stem_length
+```
+
+That is the same pair the server matches on, so a client-side pass predicts a server-side match and the fallback never fires. `uom` is the third dimension the server checks, but it is constant per OPL — see below.
+
+Note this makes Rule 3 a **membership test against the OPL's rows**, not a comparison against one scalar. The variety is fixed per OPL, so in practice it reduces to "is this bunch's length one of the lengths this OPL wants" — but express it as the two-field match, because that is what the server does and it stays correct if a multi-variety OPL ever appears.
 
 This ranks with Rule 2, not with Rule 1. Rule 1 prevents an overfull box, which is visible and recoverable. Rule 3 prevents silent stock misallocation, which is neither.
 
@@ -456,13 +517,28 @@ This ranks with Rule 2, not with Rule 1. Rule 1 prevents an overfull box, which 
 | Source | Field | Value | Format |
 |---|---|---|---|
 | ✅ `Bunch QR Code` | `bunch_size` | `Bunch(10)` | `Name(number)` — what the script's paren parse requires |
+| ✅ OPL `item_locations[*].uom` | `uom` | `Bunch(10)` | same format. **Constant across the OPL** |
 | ❌ `Sales Order` | `custom_bunching` | `X10` | different format entirely; would throw `Invalid bunch size format` |
 
-**Always take `bunch_uom` from the scanned `Bunch QR Code` record.** `custom_bunching` on the Sales Order is not a substitute — the formats do not agree, and passing `X10` fails the parse.
+**Send the value from the scanned `Bunch QR Code`.** `custom_bunching` is not a substitute — the formats do not agree and passing `X10` fails the parse.
 
-**Gap worth knowing:** nothing validates the two against each other. A `Bunch(5)` scanned into an `X10` order is accepted by the server and by Rule 1's arithmetic, which simply counts 5 stems instead of 10. The box reaches its stem cap with the wrong number of bunches in it and no one is told. Rule 3 does not catch this either — a size-5 and a size-10 bunch of the same variety share an `item_code`.
+#### ✅ ONE bunch size per OPL — and this closes the gap
 
-A client-side check comparing the bunch's parsed size against the digits in `custom_bunching` would close it. **Not specified as a rule here** because the semantics of `custom_bunching` are unconfirmed — whether it is a hard requirement or an indicative default is a question for the backend owner. Flagged so it is a decision rather than an oversight.
+All 15 rows of `OPL-2026-02914` are `Bunch(10)`; all 10 rows of `OPL-2026-02172` are `Bunch(12)`. **Size varies between OPLs, never within one.** Read it once, from `item_locations[0].uom`.
+
+Two things follow:
+
+**1. The residual `uom`-format risk is resolved.** §8.0 previously flagged, as unverified, whether OPL `item_locations.uom` used the same `Bunch(N)` form as `Bunch QR Code.bunch_size`. **It does.** So the third dimension of the server's warehouse match lines up, and Rule 3's two-field check is sufficient — the fallback will not fire on a correct scan for UOM reasons.
+
+**2. The wrong-size gap is now closable, and should be closed.** Previously this was left open because `custom_bunching`'s semantics were unconfirmed. That is no longer the obstacle: `item_locations[0].uom` states the OPL's required size in exactly the format the bunch record uses, so the check is a direct string comparison with no interpretation:
+
+```
+reject when bunch.bunch_size !== opl.item_locations[0].uom
+```
+
+Worth doing, because nothing else catches it. A `Bunch(5)` in a `Bunch(10)` OPL passes Rule 3 (same variety, same length), and Rule 1 just counts 5 stems instead of 10 — so the box hits its stem cap holding the wrong number of bunches, and the discrepancy is invisible in both the response and the Farm Pack List. **Recommend adopting this as part of Rule 3** rather than a separate rule: it is the same "does this bunch belong in this OPL" question, on the third dimension the server already matches.
+
+`custom_bunching` (`X10`) is then only a human-readable echo on the Sales Order. Its semantics remain unconfirmed but no longer matter to the client.
 
 #### Boxes have no lifecycle
 
@@ -522,7 +598,9 @@ Field mapping, confirmed against live records:
 
 The framing has changed twice; this is where it lands.
 
-**One OPL = one `Sales Order Item` = one `item_code` = one variety at one length.** A packing session scoped to an OPL cannot mix, because there is no second variety in scope to mix with. Single-variety is not a convention the client upholds — it falls out of the data model.
+**One OPL = one `item_code` = one variety, at several stem lengths.** A session scoped to an OPL cannot mix *varieties*, because there is no second variety in scope. Single-variety is not a convention the client upholds — it falls out of the data model.
+
+Note the correction: an OPL is **not** single-length. `OPL-2026-02914` runs `50CM` and `60CM`; `OPL-2026-02172` runs `60/70/80CM`. So a box may legitimately hold several lengths of one variety, and `Box Label.box_item` rows keyed `(variety, length)` are exactly how that gets recorded. "Mixed lengths" is normal; "mixed varieties" is what does not occur.
 
 Everything the original §8.3 said about mix was void anyway: `PackBoxRecipe`, `is_mix_box`, `MixRecipeItem`, `PackableOpl.is_mix` and `get_pack_box_recipe` are all from the wrong site (§8.0) and none exist here. There is **no `is_mix` flag**, so the "filter mix OPLs out of the picker" requirement has nothing to filter and is withdrawn.
 
@@ -531,7 +609,8 @@ For completeness: `Box Label.box_item` *is* a child table of `(variety, qty, uom
 #### Residual risks to watch when building
 
 - **Check against a LIVE OPL, not a snapshot one.** OPL ids in this plan are illustrative (§8.0) — the snapshot tops out at `OPL-2026-00900` while live is past `OPL-2026-02904`. Anything below only means something when re-read from the live site.
-- **The silent warehouse fallback is now Rule 3, not a watch item.** Promoted — see Rule 3 above. What remains genuinely unverified is whether OPL `item_locations.uom` uses the same `Bunch(10)` form as `Bunch QR Code.bunch_size`. If it does not, the fallback fires on *every* scan even for the correct variety, and Rule 3's `item_code` check will not catch it because the mismatch is in the UOM dimension. **Check `item_locations` on the first real live OPL before trusting the warehouse on any packed row.**
+- **⛔ OPEN — what gets scanned into a `Stems`-uom OPL?** `OPL-2026-02921` has uom `Stems`, not `Bunch(N)`. The script's `bunch_uom.split("(")[1]` raises `IndexError` on that, throwing `Invalid bunch size format for UOM 'Stems'` — so **such an OPL cannot be packed through this endpoint using its own uom.** Either these are packed some other way, or their bunches carry a `Bunch(N)` of their own regardless of the OPL's uom, or they are not meant to reach this screen at all. **Resolve before building the OPL picker:** at minimum it should exclude or visibly mark them, rather than offering an OPL that fails on the first scan. This is now the only genuinely unanswered packing question.
+- **The silent warehouse fallback is Rule 3, not a watch item.** Promoted — see Rule 3. The `uom` half of this risk is **resolved**: `item_locations[*].uom` does use the same `Bunch(N)` form as `Bunch QR Code.bunch_size`, so a correct scan will not trip the fallback on a UOM mismatch.
 - **The doctype is spelled `Order Pick LIst`** — capital `I`. That typo is the actual doctype name; any direct query must reproduce it.
 - The OPL must have `item_locations`, or the call throws `Order Pick List has no location entries defined`.
 - The Farm Pack List is `submit()`ed on creation and thereafter updated with `ignore_validate_update_after_submit`, with `status` forced to `Completed` on every write. Expect no draft state.
@@ -568,7 +647,9 @@ Verify on a preview-channel device, then promote to `production`. No new APK nee
 
 Phases 1–5 are self-contained and shippable on their own. Ship the restyle first rather than holding it behind Grading and Packing.
 
-**Grading is built** (§8.2). **Packing is unblocked and needs no backend change** (§8.3) — the cap comes from `custom_packrate` on `Sales Order Item`, read straight off the Sales Order resource, and both former open questions are closed. Three client-side rules are correctness requirements before it ships: Rule 2's one-bunch-per-scan so a rejection blames the right bunch, **Rule 3's variety check so a wrong-variety bunch cannot silently land in the wrong warehouse**, and Rule 1's stem cap plus the "Box N of M" bound.
+**Grading is built** (§8.2). **Packing is unblocked and needs no backend change** (§8.3) — every parameter comes off the OPL's own `Pick List Item` rows in one fetch: `custom_packrate` for the per-box cap, `custom_total_stems / custom_packrate` for the box count, `item_locations[0].uom` for the bunch size. Three client-side rules are correctness requirements before it ships: Rule 2's one-bunch-per-scan so a rejection blames the right bunch, **Rule 3's two-field variety-and-length match plus the bunch-size check, so no bunch can silently land in the wrong warehouse or against the wrong row**, and Rule 1's stem cap with the "Box N of M" bound.
+
+**One open question remains, and it gates the OPL picker rather than the whole screen:** OPLs whose uom is `Stems` rather than `Bunch(N)` cannot be packed through this endpoint as-is (§8.3, residual risks). Decide whether the picker excludes them before it is built.
 
 **Confidence is split, and the split matters** (§8.0): endpoint *existence* is confirmed live, but every script *body* comes from a bench snapshot ~27 July 2026. Three snapshot-sourced behaviours carry the correctness rules and are tagged 🟡 at their use sites. They cost three deliberate scans to confirm — a successful pack, an ungraded bunch, a wrong-variety bunch — and that should happen on the first live packing session rather than after it.
 
