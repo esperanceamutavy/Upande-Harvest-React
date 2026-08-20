@@ -18,14 +18,11 @@ interface DrawerControls {
   closeDrawer: () => void;
 }
 
-const DrawerContext = createContext<DrawerControls>({
-  isOpen: false,
-  // No-ops so a `Screen` rendered outside the provider still works — its
-  // hamburger simply does nothing rather than crashing. Every current consumer
-  // is inside the (app) group, so this is a guard, not a supported mode.
-  openDrawer: () => {},
-  closeDrawer: () => {},
-});
+// No default value on purpose. A no-op default turns "rendered outside the
+// provider" into a hamburger that silently does nothing, which is
+// indistinguishable from a styling or z-order problem and cost real debugging
+// time. Missing provider is a wiring bug and should say so.
+const DrawerContext = createContext<DrawerControls | null>(null);
 
 export function DrawerProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -43,6 +40,13 @@ export function DrawerProvider({ children }: { children: ReactNode }) {
   return <DrawerContext.Provider value={value}>{children}</DrawerContext.Provider>;
 }
 
-export function useDrawer() {
-  return useContext(DrawerContext);
+export function useDrawer(): DrawerControls {
+  const ctx = useContext(DrawerContext);
+  if (!ctx) {
+    throw new Error(
+      'useDrawer() called outside <DrawerProvider>. The provider wraps the (app) ' +
+        'layout — a screen reaching this is rendered outside that tree.',
+    );
+  }
+  return ctx;
 }
