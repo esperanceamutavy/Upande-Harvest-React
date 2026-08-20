@@ -150,7 +150,7 @@ All done except the harness removal at the bottom. Two corrections to what this 
 
 ## 8. Phase 6 — Grading and Packing
 
-**Backend status on `xflora.upande.com`:** **Grading is built** (§8.2). **Packing's contract is fully confirmed, but the endpoint has two live defects that block shipping** — it corrupts its own summary fields on every write, and a production `item_code`/`uom` convention mismatch silently mis-warehouses scans (§8.3). The screen can be built; it cannot ship until both are fixed server-side. Dispatch is unscoped rather than blocked (§8.4).
+**Backend status on `xflora.upande.com`:** **Grading is built** (§8.2). **Packing's contract is confirmed and its write path is fixed as of 2026-08-20** — the summary-field corruption is resolved. One blocker remains before it can ship: the `item_code`/`uom` convention mismatch that silently mis-warehouses scans and gates Rule 3 (§8.3). Dispatch is unscoped rather than blocked (§8.4).
 
 ### 8.0 Source split — read this first
 
@@ -256,7 +256,9 @@ from: "XFL Receiving Coldstore  - XFL"   →   to: "XFL Graded Sold - XFL"
 
 #### Response — FLAT envelope
 
-> 🟡 **Snapshot-sourced (~27 July 2026) and ALREADY IN SHIPPED CODE** (§8.0). `mobile_grading_entry` is confirmed to exist live, but this response shape — and the four failure modes below, the hardcoded warehouses, and the 20099–20826 self-heal — come from the stale-snapshot bench. `useSubmitGrading` was rewritten against it. **The first real grading scan on a device confirms or refutes it**: if the entries log shows variety and stem count, the shape holds; if rows read "Bunch graded" with nothing else, the envelope is not flat and the parse needs the nested form back. This is a five-second check on the device pass, not a task.
+> 🟡→🟢 **Largely confirmed.** The **error envelope below was read off the LIVE script**, and `createOrUpdateFarmPackList`'s live body turned out byte-identical to the snapshot (§8.3), which corroborates the snapshot reading of these scripts generally. The success shape, the failure modes, the hardcoded warehouses and the 20099–20826 self-heal are still snapshot-sourced and **already in shipped code** — `useSubmitGrading` was rewritten against them.
+>
+> **The first real grading scan on a device confirms the success shape**: if the entries log shows variety and stem count, the flat envelope holds; if rows read "Bunch graded" with nothing else, the parse needs the nested form back. Five seconds on the device pass, not a task.
 
 On success the script sets four **top-level siblings** on `frappe.response`, and `message` is a plain string:
 
@@ -271,7 +273,58 @@ On success the script sets four **top-level siblings** on `frappe.response`, and
 
 **`bucket_remaining_stems` is not returned either**, and would be ignored regardless — production documents it as unreliable on re-used buckets, since it sums every harvest and every bunch the bucket has ever seen with no cycle window and so floors at 0 (`GradeScreen.tsx:310-316`).
 
-On failure the script sets `http_status_code: 500` with `message` = the exception text, which `extractFrappeError` already reads correctly.
+#### Error envelope — read off the LIVE script
+
+On failure the script sets **three** keys, and the shape is unusual enough to matter:
+
+```
+http_status_code: 500
+message:          <the error text>     ← SAME KEY as the success string
+error:            <the error text>
+```
+
+**There is no `_server_messages` and no `exc_type`.** `message` carries the success string on success and the error text on failure, so **the presence of `error` is the only discriminator** in the body itself.
+
+**✅ Checked: `extractFrappeError` does handle this — but not by the path it looks like it does.** The chain is worth writing down because two of its branches are dead:
+
+1. `apiClient`'s response interceptor rejects with `parseFrappeError(error)`, so what reaches a mutation's `catch` is an **`ApiError` plain object**, not an `AxiosError`. `err.response` is therefore `undefined`, and `extractFrappeError`'s first two branches (`err.response?.data?.message`, `…exception`) **never fire for any error originating in `api.ts`.** It lands on `err.message`.
+2. `parseFrappeError` builds that `message` as `serverMessages[0] ?? data?.message ?? …`. With no `_server_messages`, `serverMessages` is `[]`, so `serverMessages[0]` is `undefined` and it falls through to `data.message` — the error text. ✔
+
+So the text surfaces correctly today, by fallback rather than by design. Two consequences:
+
+- **`excType` will always be `undefined`** for grading errors. Nothing in the grading screen branches on it, but do not add a check that does.
+- **⚠️ The whole chain depends on the response actually arriving as HTTP 500.** Frappe does honour `frappe.response["http_status_code"]`, so axios should reject — but if any layer returned 200 with that key merely present in the body, **axios would not reject and the success path would run**, reading the error text as `message` and finding no `qty` or `variety`. A failed scan would then log a *success* row reading `Bunch graded` with no detail.
+
+  This is observable on the device pass rather than theoretical: **scan an already-graded bunch.** Correct behaviour is an amber duplicate row; the failure mode is a success row with no variety or stem count.
+
+  **Recommended hardening, not yet applied** (plan-only for now): in `useSubmitGrading`, treat a present `error` key as failure regardless of HTTP status. That is the discriminator the script actually provides, it costs one condition, and it closes the case above permanently.
+
+#### ⚠️ `grader` must be an Employee DOCUMENT NAME
+
+The script resolves the badge value as a primary key:
+
+```python
+employee = frappe.db.get_value("Employee", graded_by, "name")
+if not employee:
+    frappe.throw(f"Employee {graded_by} does not exist", ...)
+```
+
+`frappe.db.get_value("Employee", <x>, …)` with a string second argument looks `<x>` up **as the docname** — e.g. `HR-EMP-00001`. Not `employee_name`, not `user_id`, not a payroll number.
+
+**This is a live risk in the shipped grading screen.** `extractGradingQrValue` prefers `employee_id` when the badge QR carries it:
+
+```ts
+return pick('employee_id', 'employee', 'grader') ?? fallback;
+```
+
+If `employee_id` is a payroll or card number rather than the Frappe docname, **every scan fails with `Employee <x> does not exist`** — and the badge scan itself will not reveal it, because the badge latches locally with no request (§8.2). The failure appears on the first bunch scan.
+
+Two things to establish, in order:
+
+1. **What do the physical badges actually encode?** One real badge scan answers it. If the value is already the Employee docname, nothing needs doing.
+2. **If not:** the site has a `lookup_employee` Server Script (`api_method: lookup_employee`, enabled). That is almost certainly the resolver for exactly this — badge value → Employee. It would mean the badge scan *does* make a request after all, which is a design change to the latch step, not just a field swap.
+
+Recorded rather than fixed: the resolution depends on badge content that only a device can reveal.
 
 #### Real failure modes
 
@@ -281,7 +334,7 @@ There are four, all surfaced from the server's own message:
 |---|---|---|
 | **Already graded** | `Bunch <id> has already been graded by <name> (<stock entry>)` | **The one a grader will actually hit.** Duplicate scan, resolved by the guard on `Stock Entry` where `stock_entry_type = 'Grading'`, `custom_bunch_id = <id>`, `docstatus = 1`. |
 | Bunch not found | `Bunch <id> not found` | No `Bunch QR Code` record. See the self-heal note below. |
-| Employee not found | `Employee <grader> does not exist` | The badge value must be an `Employee` name. |
+| Employee not found | `Employee <grader> does not exist` | The badge value must be the Employee **docname**. **Live risk — see below.** |
 | Invalid bunch size | `Invalid bunch size: '<raw>'` | `bunch_size` on the record has no digits in it. |
 
 **Already-graded is a warning, not an error.** It means the bunch is already in the system — a benign outcome for the packer, and materially different from a hard failure. The client substring-matches `already been graded` and renders it as a `warn` `Notice` plus an amber log row, reserving red for the other three. Substring, not equality: the message interpolates a name and a document id.
@@ -302,7 +355,7 @@ There is also a **self-heal path** in the script for bunch numbers `20099–2082
 - **QR routing is type-aware.** `detectGradingQrType` ports the legacy JSON-key and string-prefix detection, so a badge scanned into the bunch field re-latches the grader instead of being submitted as a bunch. Bucket-type QRs are rejected with the Direct-to-Grader message, as in the reference.
 - **Writes are serialized** through `serializeByKey('grading', …)` — §8.1. Lives in `lib/serializeByKey.ts`, not `lib/api.ts` (constraint 3).
 
-### 8.3 Packing — contract confirmed; 🔴 BLOCKED on two live backend defects
+### 8.3 Packing — contract confirmed; write path fixed; one blocker left
 
 **Everything this section previously said about packing was wrong.** It was derived from `/tmp/xflora-legacy`, which points at a different site (§8.0).
 
@@ -349,9 +402,31 @@ Note the reversal: §8.3 previously deleted `createOrUpdateFarmPackList` as "Kar
 
 `custom_farm` is assigned to a local (`user_farm`) and then never read. **Send it — it is not merely harmless, it is the value `Box Label.farm` needs**, and the fix for that is on the server side of the same wire (see the Box Label section). It does not affect the write today. On the create path neither customer nor farm is set on the Farm Pack List itself.
 
-#### 🔴 CRITICAL — the endpoint corrupts its own summary fields. VERIFIED ON LIVE DATA.
+#### ✅ FIXED (2026-08-20) — summary-field corruption. Analysis retained as the verification shape.
 
-**This is the highest-severity item in §8.3 and it is a hard gate on shipping packing.** It outranks the Box Label field gaps: those make labels incomplete, this makes stored data wrong.
+**Three defects fixed on live `xflora.upande.com`.** The live script body was byte-identical to the snapshot and untouched since 2026-02-20, so the analysis below described the live behaviour exactly — which is also the strongest confirmation yet that the snapshot reading of this script was sound (§8.0).
+
+| # | Fixed | Effect |
+|---|---|---|
+| 1 | `custom_number_of_stems` no longer accumulates — corrected at **three sites**; it is a per-bunch constant | removes the N² × 10 inflation |
+| 2 | `set_summary_fields` derives `total_stems` from `doc.pack_list_item`, not the request payload | cumulative in **both** branches; kills the assign-not-accumulate under-reporting |
+| 3 | `packed` % denominator uses `OPL.custom_total_stems` instead of summing `loc.qty` | `loc.qty` is in **bunches** on a `Bunch(N)` OPL, so the percentage was inflated ~tenfold |
+
+Defect 3 was not in the original analysis — it is a second, independent inflation in the same computation, and it means the historical `packed` figures were wrong by both N² *and* a bunches-vs-stems factor.
+
+**Packing writes are no longer corrupt.** This is no longer a ship gate.
+
+**Retained below, deliberately:** the mechanism and the N = 1 exposure table. They are now the **post-fix verification shape** — they say precisely what a correct session should and should not look like, and defect 2's fix is the one our one-bunch-per-scan client depended on most.
+
+Two things this does *not* settle:
+
+- **The 16 existing FPLs still carry the old figures.** The fix corrects future writes; it does not recompute stored documents. Backfill remains a separate decision.
+- **Remaining packing blockers are unchanged** and all still backend: the `item_code` convention question gating Rule 3, the closure trigger for the Box Label PDF, and Box Label field population.
+
+<details>
+<summary><strong>Original analysis — retained as the verification shape</strong></summary>
+
+**This was the highest-severity item in §8.3 and a hard gate on shipping packing.** It outranked the Box Label field gaps: those make labels incomplete, this made stored data wrong.
 
 `FPL-2026-00017` reports `total_stems` **64,000** and `packed` **8000.0%** for a real session of 80 × `Bunch(10)` = **800 stems**. The OPL is correct (`custom_total_stems` `"800"`), so the corruption is entirely inside `createOrUpdateFarmPackList`.
 
@@ -399,11 +474,24 @@ Cumulative and correct in **both** branches, and immune to how the payload happe
 | `pack_list_item` row data | **Correct** — `bunch_qty` accumulates via the matched-row increment |
 | `Box Label.box_item.qty` | **Correct** — `+= 1 × 10` per scan accumulates properly |
 
-So a session driven by this client produces **accurate row detail and accurate Box Label quantities, with summary fields stuck at one bunch** (`total_stems` 10, `packed` ~1%). Under-reporting rather than inflation — still corrupt, still not shippable, but worth knowing because it is a different symptom than the historical records show, and post-fix verification should check both shapes.
+So a session driven by this client produced **accurate row detail and accurate Box Label quantities, with summary fields stuck at one bunch** (`total_stems` 10, `packed` ~1%). Under-reporting rather than inflation — a different symptom from the historical records, which is why post-fix verification should check both shapes.
 
-**Blast radius.** Every FPL and Box Label created through this endpoint since February carries wrong summaries; **16 FPLs exist.** Historical data needs a backfill decision separately from the code fix — the recommended fix corrects future writes but does not recompute existing documents.
+**Blast radius.** Every FPL and Box Label created through this endpoint between February and the 2026-08-20 fix carries wrong summaries; **16 FPLs exist.**
 
-> **Provenance note (§8.0):** the four N² matches are independent live confirmation that `set_summary_fields` is unchanged from the snapshot body. That materially raises confidence in the rest of the snapshot-sourced reading of this script — including Rule 2's throw and Rule 3's warehouse fallback, both still tagged 🟡 but now corroborated by the fact that a different function in the same script behaves live exactly as the snapshot says.
+> **Provenance note (§8.0):** the four N² matches were independent live confirmation that `set_summary_fields` was unchanged from the snapshot body — since borne out directly, the live script having been byte-identical and untouched since 2026-02-20. That is strong corroboration for the rest of the snapshot-sourced reading of this script, including Rule 2's throw and Rule 3's warehouse fallback.
+
+</details>
+
+**✅ VERIFICATION SHAPE — what a correct session should now look like.** Post-fix, one-bunch-per-scan against a `Bunch(10)` OPL with `custom_total_stems` 800:
+
+| After n scans | Expected |
+|---|---|
+| `pack_list_item` row `bunch_qty` | `n` (unchanged by the fix — was already right) |
+| `total_stems` | `n × 10`, **cumulative and rising** — the old bug froze this at 10 |
+| `packed` | `n × 10 / 800 × 100` — e.g. 10% at n = 8, never above 100% |
+| `Box Label.box_item.qty` | `n × 10` (unchanged — was already right) |
+
+The two "unchanged" rows are the control: if they move, something new has broken. `total_stems` rising is the specific evidence that defect 2's fix took, and it is the one this client most depended on.
 
 #### Rule 2 — graded validation is ALREADY server-side. No backend work.
 
@@ -755,7 +843,7 @@ Rule 3 is already correct for this case: it is expressed as a membership test ov
 #### Residual risks to watch when building
 
 - **Check against a LIVE OPL, not a snapshot one.** OPL ids in this plan are illustrative (§8.0) — the snapshot tops out at `OPL-2026-00900` while live is past `OPL-2026-02904`. Anything below only means something when re-read from the live site.
-- **🔴 BLOCKING — summary-field corruption.** `total_stems` / `packed` are wrong on every write, verified live. Highest-severity item in this section; see the CRITICAL block. **Packing must not ship against the endpoint until this is fixed.**
+- ~~**BLOCKING — summary-field corruption.**~~ **✅ FIXED 2026-08-20.** Three defects corrected live; writes are no longer corrupt. The retained analysis is now the post-fix verification shape. 16 pre-fix FPLs still carry wrong summaries — backfill is a separate decision.
 - **🔴 BLOCKING — the `item_code` / `uom` convention mismatch is firing in production.** `OPL-2026-02906` (`item_code` `Athena` vs bunch `Athena-35CM`, uom `Stems`) fails two of three match dimensions on every scan and silently takes the fallback warehouse. Rule 3 cannot ship as a strict match until OPL and `Bunch QR Code` conventions are reconciled — and not shipping it leaves the silent-misallocation path open. See the Rule 3 blocker.
 - **⛔ OPEN — box closure has no trigger.** Nothing signals that a box is complete, so there is no event on which to render the Box Label PDF. Backend affordance required; see the Box Label section. Gates the printable deliverable specifically.
 - ~~**OPEN — what gets scanned into a `Stems`-uom OPL?**~~ **RESOLVED** — the paren parse reads the *payload's* `bunch_uom` (always `Bunch(N)` from the bunch record), not the OPL's, so such an OPL packs without throwing. It simply never matches a warehouse. Folded into the Rule 3 blocker above.
@@ -799,12 +887,11 @@ Phases 1–5 are self-contained and shippable on their own. Ship the restyle fir
 
 **Grading is built** (§8.2). **Packing's contract is fully mapped** (§8.3) — every parameter comes off the OPL's own `Pick List Item` rows in one fetch: `custom_packrate` for the per-box cap, `custom_total_stems / custom_packrate` for the box count, `item_locations[0].uom` for the bunch size. Three client-side rules are correctness requirements: Rule 2's one-bunch-per-scan so a rejection blames the right bunch, **Rule 3's two-field variety-and-length match plus the bunch-size check**, and Rule 1's stem cap with the "Box N of M" bound.
 
-**🔴 Packing is BLOCKED on two live backend defects. Corrected — an earlier version of this note said the Box Label backlog "does not block packing writes." The writes are themselves corrupt.**
+**Packing's write path was fixed on 2026-08-20.** ✅ The summary-field corruption — N² × 10 inflation on create, assign-not-accumulate on update, and a bunches-vs-stems denominator in `packed` % — is resolved live. **Writes are no longer corrupt.** 16 pre-fix FPLs still carry wrong summaries; backfill is a separate decision.
 
-1. **`createOrUpdateFarmPackList` corrupts its own summary fields on every write** — verified live: `total_stems` inflated N² × 10 on create, overwritten with one call's stems on update. **16 FPLs already carry wrong totals**, and every Box Label created since February inherits the same bad pair. One fix in `set_summary_fields` corrects both. **Packing must not ship until it lands**; a historical backfill is a separate decision. §8.3, CRITICAL block.
-2. **The `item_code` / `uom` convention mismatch is firing in production** — `OPL-2026-02906` fails two of three warehouse-match dimensions and silently mis-warehouses every scan. Rule 3 cannot be enabled as a strict match until OPL and `Bunch QR Code` conventions are reconciled, and leaving it off keeps the silent path open.
+*(Two earlier versions of this note were wrong in opposite directions: the first said the Box Label backlog "does not block packing writes" when the writes were themselves corrupt; the second said packing was blocked on that corruption, which is now fixed. Current position below.)*
 
-Both are Server Script / data work needing Frappe site access, **not client work.** The screen can be built against the contract meanwhile — the contract itself is settled — but it cannot ship.
+**One blocker remains before packing can ship:** the **`item_code` / `uom` convention mismatch, firing in production.** `OPL-2026-02906` fails two of three warehouse-match dimensions and silently mis-warehouses every scan. Rule 3 cannot be enabled as a strict match until OPL and `Bunch QR Code` conventions are reconciled — and leaving it off keeps the silent path open. Backend/data work, **not client work.**
 
 **Still open, lower severity:** the OPL picker's exclusion criteria (mixed-box OPLs, and any OPL whose convention mismatch cannot be reconciled), and the Box Label output workstream — six unset fields, a header `length` that cannot describe a real box, a **missing day code KEPHIS requires**, and **no closure trigger to render the PDF on**. The day-code omission in particular is recorded so that shipping without it is a decision rather than a surprise at inspection.
 
