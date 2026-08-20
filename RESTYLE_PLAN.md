@@ -1,7 +1,7 @@
 # Restyle Plan — aligning xflora-rn to the Upande Packhouse design system, + Grading and Packing
 
 > **Reference for the LOOK (read-only):** `mark-judah/upande-packhouse` — Expo SDK 54 / RN 0.81.5, expo-router, Ionicons, zustand + repository pattern.
-> **Reference for the CONTRACT (read-only):** `teddy5456/Upande-Harvest-React` — the live Xflora app. Endpoints and payloads only, no code. See §8.0.
+> **Reference for the CONTRACT:** the **Server Script list on `xflora.upande.com`** — the source of truth for what endpoints exist and what they do. `teddy5456/Upande-Harvest-React` points at a *different site* and is a hint source only; it has produced wrong endpoints twice. See §8.0.
 > **This app:** Expo SDK 56 / RN 0.85.3 / React 19.2.3, expo-router, **lucide-react-native**, **react-query**, expo-secure-store, Sentry.
 >
 > **Scope:** adopt the packhouse *visual system* and its `Screen` / `Card` / `Notice` primitives. Keep our dashboard, our data layer, our auth, our router, our SDK version. Then build Grading and Packing fresh against Xflora's own contract.
@@ -150,22 +150,34 @@ All done except the harness removal at the bottom. Two corrections to what this 
 
 ## 8. Phase 6 — Grading and Packing
 
-**Backend status on `xflora.upande.com`:** the APIs exist through packing. **Grading and Packing are UNBLOCKED.** Dispatch has no endpoints and stays blocked — see §8.4.
+**Backend status on `xflora.upande.com`:** **Grading is built** (§8.2). **Packing's contract is confirmed but one read path is missing** — Rule 1 needs `custom_packrate` exposed on a readable endpoint (§8.3(a)). Dispatch has no endpoints and stays blocked (§8.4).
 
 ### 8.0 Source split — read this first
 
-Two reference repos, and they are authoritative for different things. Mixing them up is how Kikwetu's and Karen's business rules leak into Xflora.
+Two repos and one live site. Conflating them is how Kikwetu's and Karen's business rules leak into Xflora — and how endpoints that do not exist end up in this plan.
 
-| | Repo | Authoritative for | Never take |
+| | Source | Authoritative for | Never take |
 |---|---|---|---|
 | **Look** | `mark-judah/upande-packhouse` → `/tmp/packhouse` | `Screen` / `Card` / `Notice` / `Button`, layout, component structure | business logic, endpoints, payloads |
-| **Contract** | `teddy5456/Upande-Harvest-React` → `/tmp/xflora-legacy` | endpoint names, payload shapes, response envelopes, write ordering | architecture, any code |
+| **Contract** | **The Server Script list on `xflora.upande.com`** | endpoint existence, payload shapes, response envelopes, validation rules, write ordering | — |
+| ~~Contract~~ | ~~`teddy5456/Upande-Harvest-React`~~ → `/tmp/xflora-legacy` | **nothing. Demoted — see below.** | endpoints, payloads, architecture, code |
+
+### ⚠️ The legacy repo is NOT authoritative for Xflora
+
+`teddy5456/Upande-Harvest-React` **points at a different site.** It was treated as the contract source for §8.2 and §8.3 and produced wrong answers both times:
+
+- **§8.2** cited `upande_harvest.api.get_grader_open_bucket`. It does not exist on `xflora.upande.com`.
+- **§8.3** cited seven box-scanning endpoints. **None of them exist** on `xflora.upande.com`.
+
+**The contract is the Server Script list on the target site**, readable at `/app/server-script`, or via `list_documents` on the `Server Script` doctype filtered to `script_type: 'API'` — that yields `api_method` plus `disabled` for every endpoint the app can call. Read the `script` field of the specific script before writing a client against it; these are Server Scripts, so the source *is* the specification.
+
+The legacy repo stays cloned only as a **hint source** — it suggests what an endpoint might be called and roughly how a flow behaves. Every symbol taken from it must be confirmed against the site before it reaches code. Treat an endpoint named there as a hypothesis, never a fact.
 
 ```bash
 git clone --depth 1 https://github.com/teddy5456/Upande-Harvest-React.git /tmp/xflora-legacy
 ```
 
-**Do not port from `/tmp/xflora-legacy`.** It is React Navigation + expo-sqlite + an offline sync queue on SDK 54. We take the *contract only* and build fresh on `Screen` / `Card` / `Notice` + react-query. Every endpoint below is in `/tmp/xflora-legacy/src/services/api.ts`.
+**Do not port from `/tmp/xflora-legacy`.** It is React Navigation + expo-sqlite + an offline sync queue on SDK 54. We build fresh on `Screen` / `Card` / `Notice` + react-query.
 
 Note that packhouse's packing screen lives at `src/tenants/karen/features/packing/PackingScreen.tsx` — under `tenants/karen`. The path itself is the warning: that file's flow is Karen's, and only its layout transfers.
 
@@ -179,16 +191,11 @@ The earlier plan to `git checkout origin/kikwetu -- <path>` the Kikwetu grading/
 
 This is a correctness requirement, not an optimisation. A grading screen without it will corrupt bucket state in the field under exactly the conditions it is used in — fast repeated scans on coldroom Wi-Fi.
 
-**OPEN QUESTION — do not decide unilaterally.** The legacy app serializes five keys: `grading` (460), `harvest` (523), `receiving` (543), `issuing` (892, 900), `receiving_out` (930). It does **not** serialize `add_bunch_to_box` (583) or `pack_bunch_to_opl` (607), which are also scan-driven writes. Either that is a deliberate exemption because boxes tolerate concurrent appends, or it is a latent bug the legacy app has not hit yet. **Resolve with the backend owner before building Packing.**
+**Packing needs the same guard, for a different reason — RESOLVED, no longer an open question.** The earlier framing here (a client-side cap race across `add_bunch_to_box`) is void: those endpoints do not exist, and the cap is not what races.
 
-**The §8.3 pack-rate cap narrows this question sharply.** A stem cap is a read-modify-write against a shared per-box total: read `stemsInBox`, add `incomingBunchSize`, compare to `pack_rate`. Two concurrent scans can both read the same total, both pass the check, and both commit — overfilling the box. That is precisely the corruption `serializedByKey` exists to prevent, and it means the "boxes tolerate concurrent appends" reading only holds if the box has no cap. It has one.
+`createOrUpdateFarmPackList` performs a **read-modify-write on the Farm Pack List document** — fetch the doc, find the matching `pack_list_item` row, `row.bunch_qty += n`, `doc.save()`. `Box Label` follows the identical pattern for its `box_item` rows. Two concurrent posts can read the same value and both write `n+1`, losing an increment; two concurrent first-scans can each create a duplicate Farm Pack List for the same `(sales_order, order_pick_list)`.
 
-So the answer follows from §8.3(a):
-
-- **If `add_bunch_to_box` enforces the cap atomically server-side**, client serialization is a UX nicety — the server is the guard, and a concurrent scan gets a clean rejection.
-- **If the client is the only enforcement**, concurrent scans defeat the cap outright and serialization is **mandatory**, exactly as it is for grading.
-
-**Recommendation, raised from neutral:** serialize `add_bunch_to_box` and `pack_bunch_to_opl` **unless the backend owner confirms atomic enforcement.** Serializing when it turns out to be unnecessary costs a little scan latency; not serializing when it was necessary overfills boxes in the field. The asymmetry favours the guard, so it should be the default and removed only on a confirmed answer.
+**Wrap packing writes in `serializeByKey('packing')`.** Distinct key from `'grading'`, so the two flows queue independently rather than blocking each other. Detail in §8.3.
 
 ### 8.2 Grading — unblocked, online-only, core flow only. ✅ BUILT
 
@@ -233,76 +240,176 @@ This is accepted. The server's error is more specific than anything the client c
 - **QR routing is type-aware.** `detectGradingQrType` ports the legacy JSON-key and string-prefix detection, so a badge scanned into the bunch field re-latches the grader instead of being submitted as a bunch. Bucket-type QRs are rejected with the Direct-to-Grader message, as in the reference.
 - **Writes are serialized** through `serializeByKey('grading', …)` — §8.1. Lives in `lib/serializeByKey.ts`, not `lib/api.ts` (constraint 3).
 
-### 8.3 Packing — unblocked
+### 8.3 Packing — contract confirmed against the site. NOT YET BUILT
 
-Xflora's own contract. `api.ts:579-615`:
+**Everything this section previously said about packing was wrong.** It was derived from `/tmp/xflora-legacy`, which points at a different site (§8.0).
 
-| Endpoint | Payload |
-|---|---|
-| `list_open_opls_for_packing` | `{ from_date?, to_date? }` |
-| `get_packable_varieties` | `{}` |
-| `create_boxes_for_opl` | `{ opl }` |
-| `get_open_box_for_opl` | `{ opl }` |
-| `add_bunch_to_box` | `{ bunch_id, box_id?, opl?, farm? }` |
-| `close_pack_box` | `{ box_name }` |
-| `pack_bunch_to_opl` | `{ opl, bunch_id }` |
+#### DELETED — the box-scanning model does not exist
 
-**Deleted from this plan as not existing on Xflora:** `get_pick_list_with_farm_pack_list`, `createOrUpdateFarmPackList`, `fetchPicklists`, `fetchStockEntryByBunch`, and the `Farm Pack List` doctype. Those are Karen's Farm Pack List flow. The ten client-side validations and the `data`-not-`message` envelope quirk went with them.
+None of these are on `xflora.upande.com`. Verified against the full Server Script list (63 scripts):
 
-Use packhouse's `PackingScreen.tsx` for layout and component structure only.
+`list_open_opls_for_packing` · `get_packable_varieties` · `create_boxes_for_opl` · `get_open_box_for_opl` · `add_bunch_to_box` · `close_pack_box` · `pack_bunch_to_opl` · `get_pack_box_recipe`
 
-#### Rule 1 — pack rate cap
+The three "blocking questions" about `add_bunch_to_box` are deleted with it — there is no such endpoint to ask questions about. **`createOrUpdateFarmPackList` is the only packing write.**
 
-**Scope: Xflora packs straight single-variety boxes.** Mix boxes are a later phase — see "Mix boxes" below. Rule 1 is the correct cap for every box in Phase 6 scope.
+Note the reversal: §8.3 previously deleted `createOrUpdateFarmPackList` as "Karen's flow, does not exist on Xflora". That was exactly backwards. It exists, it is enabled, and it is the whole contract.
 
-`pack_rate` comes from the Sales Order via the OPL. It is returned by `get_open_box_for_opl` (`OpenBoxResponse.pack_rate`, `types/index.ts:373`) and by `list_open_opls_for_packing` (`PackableOpl.pack_rate`, `types/index.ts:382`). A third endpoint, `get_pack_box_recipe`, also carries it (`PackBoxRecipe.pack_rate`, `api.ts:649`), but is not needed in Phase 6 — again, see "Mix boxes".
+#### The real contract
 
-**`pack_rate` is expressed in STEMS, not bunches.** A box at `pack_rate` 250 holds 25 bunches only if every bunch is size 10, and `bunch_size` is per `Bunch QR Code` record. **Do not implement a bunch-count cap.** Track a running stem total.
-
-The test is whether the **incoming** bunch overshoots:
+`POST /api/method/createOrUpdateFarmPackList` — Server Script `Create Or Update Farm Pack List`, module `Upande Harvest`, enabled. Requires `Content-Type: application/json`; the script reads `frappe.request.get_json()`.
 
 ```
-stemsInBox + incomingBunchSize > pack_rate   → reject the scan
+{
+  custom_sales_order:     string,   // REQUIRED — throws if missing
+  custom_order_pick_list: string,   // REQUIRED — throws if missing
+  custom_customer:        string,   // used only as Box Label.customer on creation
+  custom_farm:            string,   // read into a local and never used — see below
+  items: [{
+    item_code:          string,     // required per row
+    bunch_uom:          string,     // required per row, format "Name(number)"
+    bunch_id:           string,     // required per row
+    custom_stem_length: string,     // required per row
+    box_id:             string,     // default "1"
+    bunch_qty:          number,     // default 1
+  }]
+}
 ```
 
-The legacy app gets this wrong twice, and both are defects to fix rather than behaviour to copy:
+**Response envelope is `data`, not `message`.** The script sets `frappe.response['data'] = {...}`, so the client reads `res.data.data`:
 
-1. **Off by one bunch.** `PackingScreen.tsx:199` tests `stemsInBox >= session.pack_rate` — it admits a bunch that overshoots, and only refuses the one *after*. A box at 245/250 accepts a size-10 bunch and lands at 255.
-2. **Offline-only.** That check sits inside an `if (!isConnected)` branch. **Online scans have no client-side cap at all** — the online path posts and then merely *reports* the result (`PackingScreen.tsx:246`: `show('success', 'Box full — …')`, a success toast).
+```
+{ status: 'created' | 'updated', message, docname, already_packed: [...], newly_packed: number }
+```
 
-#### Mix boxes — deliberately deferred, not missing
+**Every error is double-wrapped.** The script's outer handler is `except Exception as e: frappe.throw(_("Error processing packing: ") + str(e))`, and `frappe.throw` is how its own validations fire — so they get caught and re-thrown with the prefix. A Rule-2 rejection reaches the client as `Error processing packing: Bunch BUNCH-123 has not been graded in the system…`. **Match on substrings, never on equality.**
 
-Xflora packs single-variety boxes. Mix is a later phase and is **out of Phase 6 scope by decision**, not by oversight. The machinery exists in the contract and is named here so nobody rediscovers it as a gap:
+`custom_farm` is assigned to a local (`user_farm`) and then never read. Send it anyway — harmless, and it is the obvious field to start honouring — but do not expect it to affect the write. On the create path neither customer nor farm is set on the Farm Pack List itself.
 
-| Symbol | Location | Status |
+#### Rule 2 — graded validation is ALREADY server-side. No backend work.
+
+```python
+if not grading_stock_entry:
+    frappe.throw(_("Bunch " + bunch_id + " has not been graded in the system. "
+                   "Perform the grading scan on it to enable packing"))
+```
+
+The lookup is `Stock Entry` where `custom_bunch_id == bunch_id`. Grading sets that field (`mobile_grading_entry` writes `custom_bunch_id` and `custom_scanned_grading = 1`), so the two flows already interlock.
+
+**It surfaces late only because the current client batches.** `frappe.throw` aborts the whole request, so one ungraded bunch at position 17 kills all 25 scans in the array.
+
+**THE FIX IS CLIENT-SIDE: one bunch per scan, `items` of length 1.** Then a rejection blames exactly the bunch that caused it and the preceding scans are already committed. Render the server's message in the `danger` `Notice`.
+
+A second reason to submit singly: rows failing `if not all([item_code, bunch_uom, stem_length, bunch_id]): continue` are **silently dropped** — no error, no mention in the response. In a batch they vanish. At length 1 the array empties and the script throws `No valid entries to process`, which is at least visible.
+
+#### `already_packed` — and the conflict one-per-scan creates
+
+A bunch whose Stock Entry has `custom_scanned_packing == 1` is **not** thrown on. It is appended to `already_packed_bunches` and skipped.
+
+**But that only holds in a batch.** The script also has:
+
+```python
+if already_packed_bunches and not processed_items:
+    frappe.throw(_("All scanned bunches have already been packed: " + bunch_list))
+```
+
+At `items` length 1 an already-packed bunch is *always* the only item, so `processed_items` is always empty and **this always throws.** One-per-scan therefore converts the graceful skip into an exception.
+
+**Consequence for the client:** to surface an already-packed bunch as a `warn` rather than a `danger`, the client must catch the error and test the message for `already been packed`, downgrading the tone on a match. The `already_packed[]` array will effectively never be populated in our usage — it is a batch-only affordance. Do not build the warn path around reading that array.
+
+#### Rule 1 — pack rate cap is NOT server-side. Client must implement it.
+
+There is no `pack_rate`, no capacity check and no box-fullness concept anywhere in the script. Nothing stops an overfilled box server-side.
+
+Mirror the script's own parse so client and server agree on stem counts exactly:
+
+```
+stems_per_bunch = int(bunch_uom.split("(")[1].split(")")[0])   // "Bunch(10)" → 10
+reject when box_total + (bunch_qty * stems_per_bunch) > pack_rate
+```
+
+The script computes `number_of_stems` identically and throws `Invalid bunch size format for UOM '<uom>'. Expected format: 'Name(number)'` when the parse fails — so a client-side parse failure predicts a server-side one, and should block the scan locally rather than round-trip.
+
+**Field name: `custom_packrate`** — Int, label "Packrate", on `Sales Order Item`. Confirmed by listing `Custom Field` where `dt = 'Sales Order Item'`. **Note it is `custom_packrate`, not `custom_pack_rate`** — the obvious guess is wrong.
+
+`xflora_set_so_item_pack_fields` is the **writer** of that field (a desk-side setter run after `update_child_qty_rate`, which also maintains `custom_number_of_boxes` and the parent's `custom_total_boxes`). It is not a read path for the app.
+
+#### Boxes have no lifecycle
+
+`box_id` is an integer-as-string, default `"1"`. The script converts it with `box_number = int(bucket_id)` and — on `ValueError`/`TypeError` — **silently falls back to `box_number = 0`** rather than erroring. Always send a numeric string.
+
+It becomes `box_number` on a `Box Label` keyed by `(order_pick_list, box_number)`: existing label → matching `box_item` row by `(variety, length)` gets `qty += bunch_qty * number_of_stems`, else a new row is appended; no label → one is created. There is nothing to open and nothing to close. **The client owns the box number: pick it, and increment it when the Rule 1 cap would be exceeded.**
+
+Internally the Farm Pack List stores the box number in a field named `bucket_id` on `pack_list_item`. Confusing, but that is the column — it is the box, not a coldroom bucket.
+
+#### Serialization — requirement stands, reasoning corrected
+
+Not a cap race. `createOrUpdateFarmPackList` does a **read-modify-write on the Farm Pack List document**:
+
+```python
+doc = frappe.get_doc("Farm Pack List", existing_doc[0].name)
+...
+row.bunch_qty = (row.bunch_qty or 0) + vals["bunch_qty"]
+doc.save()
+```
+
+Two concurrent posts can both read the same `bunch_qty` and both write `n+1`, losing an increment. `Box Label` has the identical fetch → `row.qty += …` → `save()` pattern, so it can lose a box row's stems the same way. There is also a create race: two concurrent first-scans can both find no existing Farm Pack List and both create one for the same `(sales_order, order_pick_list)`.
+
+**Wrap in `serializeByKey('packing')`** — same mechanism as grading (§8.1), different key, so packing and grading do not block each other.
+
+#### Resolved — the two questions that were blocking
+
+**(a) pack rate field name — RESOLVED, but the read path is not.**
+
+The field is `custom_packrate` on `Sales Order Item`. **However, no endpoint currently exposes it.** `get_sales_order_lines` selects only:
+
+```
+item_code, item_name, qty, stock_uom, custom_stock_available, custom_fully_allocated
+```
+
+So Rule 1 is **still blocked** — not on the field name, on having any way to read it. Two options, and this needs a decision:
+
+1. **Add `custom_packrate` to `get_sales_order_lines`'s `fields` list** — a one-line server change to an existing, enabled script. Cheapest, and the natural home. `custom_length` and `custom_opl` are probably wanted in the same edit.
+2. **Read `Sales Order Item` directly** via the REST resource API. Unverified: the doctype refused a metadata read under the account tested (`No permission to access DocType 'Sales Order Item'`), so app-user permissions must be checked before relying on this.
+
+Option 1 is recommended. Until one lands, **Rule 1 cannot be implemented** and packing would ship with no cap — which is what the legacy app effectively does online, and is the defect this rule exists to fix.
+
+**(b) resolving `item_code` / `bunch_uom` / `custom_stem_length` from a scanned `bunch_id` — RESOLVED.**
+
+Not `get_bucket_details`. That endpoint takes a **`bucket_id`**, not a bunch, and returns `{bucket_id, variety, greenhouse, farm, found, found_via}` — no UOM, no stem length. Wrong key and wrong fields.
+
+The answer is a direct read of the **`Bunch QR Code`** doctype, keyed by `bunch_id`, which is precisely what `mobile_grading_entry` does internally:
+
+```python
+frappe.db.get_value("Bunch QR Code", bunch_id,
+                    ["item_code", "stem_length", "bunch_size", "farm"], as_dict=True)
+```
+
+Client-side that is `frappe.client.get_value` on `Bunch QR Code` — i.e. **the legacy `getBunchInfo` call is correct after all**, which is consistent with its only legacy consumer having been the packing screen (§8.2).
+
+Field mapping, confirmed against live records:
+
+| Payload field | Source | Example |
 |---|---|---|
-| `PackableOpl.is_mix` | `types/index.ts:383` | present, unused in Phase 6 |
-| `PackBoxRecipe.is_mix_box` | `api.ts:652` | present, unused in Phase 6 |
-| `PackBoxRecipe.recipe: MixRecipeItem[]` | `api.ts:653` | present, unused in Phase 6 |
-| `MixRecipeItem` — `{ item_code, item_name, target_stems, packed_stems, remaining, done }` | `api.ts:636-643` | present, unused in Phase 6 |
-| `get_pack_box_recipe` | `api.ts:657` | **not called in Phase 6** |
+| `item_code` | `Bunch QR Code.item_code` | `Athena-35CM` |
+| `bunch_uom` | `Bunch QR Code.bunch_size` | `Bunch(10)` |
+| `custom_stem_length` | `Bunch QR Code.stem_length` | `35CM` |
 
-**Requirement:** if `list_open_opls_for_packing` returns OPLs with `is_mix: true`, **filter them out of the picker.** The payload accepts only `{ from_date?, to_date? }`, so there is no server-side filter to ask for — this is a client-side exclusion. A mix OPL that can be selected will fail somewhere deeper in the flow, where the error is far harder to read than "not offered".
+`bunch_size` is already in the `Name(number)` form the script's paren parse requires — verified on live rows, not inferred.
 
-**Consequence for whenever mix does land: Rule 1 gets rewritten, not extended.** A mix box's cap is not one stem total against one `pack_rate` — `MixRecipeItem` carries `target_stems` / `packed_stems` / `remaining` **per `item_code`**, so the cap becomes per-recipe-line, and the admission test becomes "does this bunch's variety have a line with room" rather than "is there room in the box". A single running total cannot express that. Recording it now so nobody tries to bolt mix onto Rule 1 later.
+#### Mix boxes — the deferral stands, its rationale does not
 
-#### Rule 2 — graded validation at scan time
+**Product decision unchanged: Xflora packs single-variety boxes, mix is a later phase.**
 
-An ungraded bunch must be rejected **the moment it is scanned**, not at `close_pack_box`. Deferring it to close means a packer discovers the bad bunch after the box is physically packed. Current behaviour is the defect being fixed.
+Everything the previous §8.3 said *about* mix is void — `PackBoxRecipe`, `is_mix_box`, `MixRecipeItem`, `PackableOpl.is_mix` and `get_pack_box_recipe` are all from the wrong site and none exist here. There is consequently **no `is_mix` flag to filter on**, so the "filter mix OPLs out of the picker" requirement has nothing to filter and is withdrawn.
 
-#### Backend implication — record, do not design around
+Note what the real schema permits, though: `Box Label.box_item` is a child table of `(variety, qty, uom, length)` rows, and the script appends a new row whenever `(variety, length)` does not match an existing one. **Multiple varieties in one box is structurally representable today** — nothing enforces single-variety. So "single-variety" is a convention the client upholds by how it assigns box numbers, not an invariant the backend guards. If mix later becomes real, it is a client-side and cap-side change, not a schema change.
 
-Both rules are most likely **server-side changes to `add_bunch_to_box`**, which today appears to accept both overfill and ungraded bunches.
+#### Residual risks to watch when building
 
-**Client-side enforcement alone is not sufficient.** Two scans landing concurrently can both read the same stem total and both pass a client check, and the box overfills anyway. The robust shape is **atomic rejection inside `add_bunch_to_box`**, with the client mirroring the rule purely for instant feedback.
-
-#### BLOCKING QUESTIONS for the backend owner
-
-- **(a)** Does `add_bunch_to_box` reject a bunch that would exceed `pack_rate`, or does it accept and merely flag? *Evidence it does not reject:* the legacy online path treats a full box as a success (`PackingScreen.tsx:246`), which implies the server accepted the overshooting bunch and reported `full: true` afterwards.
-- **(b)** Does it reject an ungraded bunch, or is that check only in `close_pack_box`?
-- **(c)** Does its response return `stems_count` and the bunch's own stem contribution, so the client can render `N/250` without a second round trip? **Largely already answered — needs confirmation, not discovery.** `AddBunchResponse` (`types/index.ts:314-324`) already declares `stems` (this bunch's contribution), `stems_count`, `pack_rate`, `remaining`, and `full`; `PackBunchToOplResponse` (`types/index.ts:401-417`) declares the same set plus `bunch.bunch_size`. So the question narrows to whether those fields are populated and authoritative post-write.
-
-Serialization for `add_bunch_to_box` / `pack_bunch_to_opl` is unresolved — see §8.1, where these rules sharpen it considerably.
+- **Warehouse mis-resolution is silent.** `source_warehouse` is matched against `order_pick_list.item_locations` on `(item_code, custom_stem_length, uom)`; on no match it falls back to `item_locations[0].warehouse`. Whether OPL `item_locations.uom` uses the same `Bunch(10)` form is **unverified**. A mismatch does not error — it packs against the wrong warehouse. Worth an explicit check on the first real OPL.
+- **The doctype is spelled `Order Pick LIst`** — capital `I`. That typo is the actual doctype name; any direct query must reproduce it.
+- The OPL must have `item_locations`, or the call throws `Order Pick List has no location entries defined`.
+- The Farm Pack List is `submit()`ed on creation and thereafter updated with `ignore_validate_update_after_submit`, with `status` forced to `Completed` on every write. Expect no draft state.
 
 ### 8.4 Dispatch — BLOCKED
 
@@ -312,7 +419,9 @@ No endpoints on Xflora. Placeholder only.
 
 ### 8.5 Navigation
 
-`drawerItems.ts` has Grading and Packing stubbed as v2 candidates; uncomment and point at `/grading` and `/packing`. Decide whether either earns a slot on the five-tab bar in `(app)/_layout.tsx` or stays drawer-only with `href: null`. Both are tab-or-drawer destinations, so neither takes `onBack` (§5).
+**Grading is done** — `{ label: 'Grading', icon: Hexagon, route: '/grading' }` in `WORKFLOW_ITEMS`, registered `href: null` in `(app)/_layout.tsx`, so it is drawer-and-quick-action only. The tab bar is full at five; promoting Grading onto it means demoting something else, which is an open call.
+
+**Packing** takes the same treatment when built: drawer entry plus `href: null`. Both are tab-or-drawer destinations, so neither takes `onBack` (§5).
 
 ## 9. Phase 7 — ship
 
@@ -330,4 +439,8 @@ Verify on a preview-channel device, then promote to `production`. No new APK nee
 
 Phases 1–5 are self-contained and shippable on their own. Ship the restyle first rather than holding it behind Grading and Packing.
 
-Phase 6 is no longer backend-blocked: Grading and Packing are unblocked and can be built once Phase 5 lands. **Grading is clear to start first** — it has no open questions. **Packing has three blocking questions (§8.3) plus the serialization decision that follows from them (§8.1)**, all needing the backend owner. Dispatch stays blocked indefinitely on §8.4.
+**Grading is built** (§8.2). **Packing's contract is fully mapped from the Server Script source** (§8.3) — payload, response envelope, validation rules, box semantics and the serialization requirement are all settled, and both former open questions are answered.
+
+**One thing blocks the packing build: there is no readable source for `custom_packrate`.** The field exists on `Sales Order Item`, but `get_sales_order_lines` does not select it, so Rule 1's cap cannot be computed. Recommended fix is a one-line addition to that Server Script — see §8.3(a). Everything else in packing can be built against a confirmed contract.
+
+Dispatch stays blocked indefinitely on §8.4.
