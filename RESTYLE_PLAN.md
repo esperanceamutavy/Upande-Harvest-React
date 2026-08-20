@@ -627,6 +627,29 @@ Packers scan bunches and think in bunches, so **every number the packing screen 
 
 **Fallback:** `stemsPerBunch` is null when the OPL's uom is not in `Name(n)` form (`Stems`-uom OPLs exist), and every bunch figure falls back to the raw unit-neutral numbers.
 
+#### 🔴 OPL QUANTITIES ARE UNRELIABLE — the SALES ORDER is the source of truth
+
+**Until the allocator is fixed, no target may be read from the OPL.** `Pick List Item.qty` and the header `custom_total_stems` both under-report: `OPL-2026-02953` allocated **0.8 bunches** against an order for **8**.
+
+**Targets come from the Sales Order line**, reached via the OPL's `sales_order` field and matched on the line whose `custom_opl` is this OPL:
+
+| SO line field | Example | Use |
+|---|---|---|
+| `qty` | `8` | the order target, **in the line's uom** |
+| `uom` | `Bunch(10)` | |
+| `conversion_factor` | `10` | |
+| `stock_qty` | `80` | the order in stems |
+| `custom_packrate` | `4` | **per-box cap, IN THE LINE'S UOM** |
+| `custom_number_of_boxes` | `2` | box count — **authoritative, used directly** |
+
+**`custom_packrate` is expressed in the SO line's uom** — verified across two live orders: `Bunch(10)` with packrate 4 means four bunches; `Stems` with packrate 140 means 140 stems. Convert with `conversion_factor` only when the uom is stems.
+
+**`custom_number_of_boxes` is used directly rather than dividing.** It is already correct, and taking it avoids inventing a rounding rule for the trailing box.
+
+**The OPL is still used** for shelf, warehouse, the item rows Rule 3 matches against, and the payload's `custom_order_pick_list`. Only the *targets* moved.
+
+Consequence for the UI: the item list no longer shows a per-row quantity. Its job is to tell the packer where to walk, and the row's own qty would contradict the SO target sitting above it.
+
 #### 🔴 BACKEND DEFECT — the allocator appears to ignore `conversion_factor`
 
 `OPL-2026-02953` allocated **8** against a Sales Order line of `qty 8`, `uom Bunch(10)`, `stock_qty 80`. It wrote the bunch count where the stem count belongs, at both the row level and the header total.

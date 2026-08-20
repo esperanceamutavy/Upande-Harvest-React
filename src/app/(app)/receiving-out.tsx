@@ -5,7 +5,8 @@ import { QrCode } from 'lucide-react-native';
 
 import { useFarm } from '../../features/station/useFarm';
 import { useReceivingOut } from '../../features/receiving-out/useReceivingOut';
-import { detectGradingQrType, extractGradingQrValue } from '../../features/grading/gradingQr';
+import { detectGradingQrType } from '../../features/scanning/qr';
+import { extractScannedId } from '../../lib/qr';
 import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOverlay';
 import { playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
@@ -216,7 +217,7 @@ export default function ReceivingOutScreen() {
 
   function handleValue(slot: Slot, raw: string) {
     if (slot === 'grader') {
-      const value = extractGradingQrValue(raw);
+      const value = extractScannedId(raw);
       if (value) latchGrader(value);
       return;
     }

@@ -3,7 +3,8 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 import { QrCode } from 'lucide-react-native';
 
 import { useOplList } from '../../features/packing/useOplList';
-import { deriveSession, useOrderPickList } from '../../features/packing/useOrderPickList';
+import { useOrderPickList } from '../../features/packing/useOrderPickList';
+import { useSalesOrderTargets } from '../../features/packing/useSalesOrderTargets';
 import { useBunchDetails } from '../../features/packing/useBunchDetails';
 import {
   classifyPackError,
@@ -14,6 +15,7 @@ import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOve
 import { playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
 import { extractFrappeError } from '../../lib/api';
+import { extractScannedId } from '../../lib/qr';
 import { Button } from '../../components/ui/Button';
 import { Card, Notice, type NoticeTone } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
@@ -31,11 +33,19 @@ import type {
 
 // Packing. Three steps: pick an OPL, review it, then scan bunches into boxes.
 //
+// TARGETS COME FROM THE SALES ORDER, not the OPL: the allocator is broken and
+// OPL quantities under-report (§8.3). The OPL still supplies shelf, warehouse,
+// the item rows Rule 3 matches against, and the id sent as
+// `custom_order_pick_list`.
+//
+// Everything is counted in BUNCHES — one scan is one bunch, and both the cap
+// and the target arrive from the SO already in bunches.
+//
 // One request per bunch (Rule 2), so an ungraded-bunch rejection names the scan
-// that caused it. The client owns box numbering and the stem cap (Rule 1) — the
+// that caused it. The client owns box numbering and the cap (Rule 1) — the
 // server has neither. Rule 3 validates variety and stem length against the
 // OPL's rows before posting, because a mismatch does not error server-side, it
-// silently packs into the wrong warehouse. See RESTYLE_PLAN.md §8.3.
+// silently packs into the wrong warehouse.
 
 const MAX_LOG_ROWS = 12;
 
@@ -63,6 +73,7 @@ export default function PackingScreen() {
   const [range, setRange] = useState<OplDateFilter>('today');
   const oplList = useOplList(range);
   const oplMut = useOrderPickList();
+  const targetsMut = useSalesOrderTargets();
   const bunchMut = useBunchDetails();
   const packMut = usePackBunch();
 
@@ -77,10 +88,9 @@ export default function PackingScreen() {
   // The per-bunch increment is the bunch's own stem count, which is correct
   // when the OPL is well-formed and wrong in the same direction as the OPL when
   // it is not — see the allocator defect in §8.3.
-  const [unitsInBox, setUnitsInBox] = useState(0);
-  const [unitsPacked, setUnitsPacked] = useState(0);
-  // DISPLAY ONLY — plain bunch counts. Rule 1 never reads these; it compares
-  // unitsInBox against capPerBox so like is compared with like.
+  // Everything is bunches now: the cap and the target both come from the Sales
+  // Order in bunches, and one scan is one bunch. No unit conversion left in the
+  // hot path, and nothing to compare across units.
   const [bunchesInBox, setBunchesInBox] = useState(0);
   const [bunchesPacked, setBunchesPacked] = useState(0);
 
@@ -94,7 +104,7 @@ export default function PackingScreen() {
   const seqRef = useRef(0);
   const bunchRef = useRef<TextInput>(null);
 
-  const loadingOpl = oplMut.isPending;
+  const loadingOpl = oplMut.isPending || targetsMut.isPending;
   const busy = bunchMut.isPending || packMut.isPending;
 
   function setBunchProgrammatic(value: string) {
@@ -134,20 +144,15 @@ export default function PackingScreen() {
         playError();
         return;
       }
-      const derived = deriveSession(opl);
-      if (!derived) {
-        setFeedback({
-          tone: 'danger',
-          text: `${opl.name} has no usable pack rate or order total — box sizes cannot be computed.`,
-        });
-        playError();
-        return;
-      }
+      // Targets come from the SALES ORDER, never the OPL — the allocator is
+      // broken and OPL quantities cannot be trusted (§8.3).
+      const targets = await targetsMut.mutateAsync({
+        salesOrder: opl.salesOrder,
+        oplName: opl.name,
+      });
 
-      setSession(derived);
+      setSession({ opl, targets });
       setBoxNumber(1);
-      setUnitsInBox(0);
-      setUnitsPacked(0);
       setBunchesInBox(0);
       setBunchesPacked(0);
       setEntries([]);
@@ -166,8 +171,6 @@ export default function PackingScreen() {
     setSession(null);
     setBunchProgrammatic('');
     setBoxNumber(1);
-    setUnitsInBox(0);
-    setUnitsPacked(0);
     setBunchesInBox(0);
     setBunchesPacked(0);
     setEntries([]);
@@ -191,23 +194,31 @@ export default function PackingScreen() {
     return null;
   }
 
-  /** Rule 1 — which box this bunch goes into. Pure; commits nothing. */
-  function planBox(s: PackingSession, units: number): { boxId: number; unitsAfter: number } | null {
+  /**
+   * Rule 1 — which box this bunch goes into. Pure; commits nothing.
+   * One scan is one bunch, and the cap is in bunches, so this is a plain count.
+   */
+  function planBox(s: PackingSession): { boxId: number; bunchesAfter: number } | null {
     let boxId = boxNumber;
-    let inBox = unitsInBox;
-    if (inBox + units > s.capPerBox) {
+    let inBox = bunchesInBox;
+    if (inBox + 1 > s.targets.capBunches) {
       boxId += 1;
       inBox = 0;
     }
-    if (boxId > s.boxCount) return null;
-    return { boxId, unitsAfter: inBox + units };
+    if (boxId > s.targets.boxCount) return null;
+    return { boxId, bunchesAfter: inBox + 1 };
   }
 
   async function handleBunch(raw: string) {
     const s = session;
     if (!s || isProcessingRef.current) return;
 
-    const bunchId = raw.trim();
+    // UNWRAP AT CAPTURE. Bunch QRs arrive JSON-wrapped —
+    // {"bunch_id":"BUNCH-38203"} — and this is the single funnel both the wedge
+    // and the camera path reach, so everything downstream (the dedupe set, the
+    // session log, the payload) holds the clean id. Sending raw is what produced
+    // `Bunch {"bunch_id":"BUNCH-38203"} not found`.
+    const bunchId = extractScannedId(raw);
     if (!bunchId) return;
 
     if (packedIdsRef.current.has(bunchId)) {
@@ -239,12 +250,12 @@ export default function PackingScreen() {
         return;
       }
 
-      const plan = planBox(s, bunch.stemsPerBunch);
+      const plan = planBox(s);
       if (!plan) {
         reject(
           bunchId,
           'order-complete',
-          `All ${s.boxCount} boxes are full — ${s.opl.name} is fully packed. Nothing further can be added.`,
+          `All ${s.targets.boxCount} boxes are full — ${s.opl.name} is fully packed. Nothing further can be added.`,
         );
         return;
       }
@@ -271,22 +282,14 @@ export default function PackingScreen() {
 
       // Commit box state only after the write lands.
       packedIdsRef.current.add(bunchId);
-      // A new box resets the in-box bunch count; the order total keeps rising.
-      const bunchesAfter = (plan.boxId === boxNumber ? bunchesInBox : 0) + 1;
       setBoxNumber(plan.boxId);
-      setUnitsInBox(plan.unitsAfter);
-      setUnitsPacked((prev) => prev + bunch.stemsPerBunch);
-      setBunchesInBox(bunchesAfter);
+      setBunchesInBox(plan.bunchesAfter);
       setBunchesPacked((prev) => prev + 1);
 
       playSubmit();
       setFeedback({
         tone: 'success',
-        text: `Box ${plan.boxId} — ${
-          s.capBunches != null
-            ? `${bunchesAfter} of ${s.capBunches} bunches`
-            : `${plan.unitsAfter}/${s.capPerBox}`
-        } · ${bunch.itemCode} ${bunch.stemLength}`,
+        text: `Box ${plan.boxId} — ${plan.bunchesAfter} of ${s.targets.capBunches} bunches · ${bunch.itemCode} ${bunch.stemLength}`,
       });
       logEntry({
         bunchId,
@@ -386,25 +389,12 @@ export default function PackingScreen() {
           <DetailRow label="Customer" value={session.opl.customer ?? '—'} />
           <DetailRow label="Sales order" value={session.opl.salesOrder ?? '—'} />
           <DetailRow label="Box type" value={session.opl.boxType ?? '—'} />
-          {/* Unit-neutral on purpose: custom_packrate and custom_total_stems
-              share a unit, but it is NOT reliably stems (§8.3), so labelling
-              them would be a lie on any OPL the allocator got wrong. */}
-          <DetailRow label="Bunch size" value={session.opl.rows[0]?.uom ?? '—'} />
-          <DetailRow
-            label="Per box"
-            value={
-              session.capBunches != null ? `${session.capBunches} bunches` : `${session.capPerBox}`
-            }
-          />
-          <DetailRow
-            label="Order total"
-            value={
-              session.totalBunches != null
-                ? `${session.totalBunches} bunches`
-                : (session.opl.totalUnits ?? '—')
-            }
-          />
-          <DetailRow label="Boxes" value={`${session.boxCount}`} />
+          {/* Targets from the SALES ORDER, not the OPL — the allocator is
+              broken and OPL quantities under-report (§8.3). */}
+          <DetailRow label="Bunch size" value={session.targets.uom} />
+          <DetailRow label="Per box" value={`${session.targets.capBunches} bunches`} />
+          <DetailRow label="Order target" value={`${session.targets.targetBunches} bunches`} />
+          <DetailRow label="Boxes" value={`${session.targets.boxCount}`} />
         </View>
         <Button
           label="Change pick list"
@@ -421,13 +411,12 @@ export default function PackingScreen() {
               <Text style={styles.itemTitle} numberOfLines={1}>
                 {row.itemCode} · {row.stemLength}
               </Text>
-              {/* Whole bunches. `qty` is already in bunches, so this is just a
-                  round — a fraction like 0.8 means the OPL itself is wrong
-                  (§8.3, allocator defect), and surfacing that to a packer mid
-                  shift helps nobody. The bunch size stays alongside because the
-                  packer needs to check it. */}
+              {/* Shelf is what this list is FOR — it tells the packer where to
+                  walk. The row's own qty is deliberately not shown: it comes
+                  from the broken allocator and would contradict the Sales Order
+                  target above it. */}
               <Text style={styles.itemMeta} numberOfLines={1}>
-                {Math.round(row.qty)} bunches · {row.uom}
+                {row.uom}
                 {row.shelf ? ` · shelf ${row.shelf}` : ''}
               </Text>
             </View>
@@ -436,20 +425,14 @@ export default function PackingScreen() {
       </Card>
 
       {/* Persistent counter — shown always, not only on error. */}
-      <Card title={`Box ${boxNumber} of ${session.boxCount}`}>
+      <Card title={`Box ${boxNumber} of ${session.targets.boxCount}`}>
         <Text style={styles.counter}>
-          {session.capBunches != null
-            ? `${bunchesInBox} of ${session.capBunches} bunches`
-            : `${unitsInBox} / ${session.capPerBox}`}
+          {bunchesInBox} of {session.targets.capBunches} bunches
         </Text>
         <View style={styles.rows}>
           <DetailRow
             label="Order progress"
-            value={
-              session.totalBunches != null
-                ? `${bunchesPacked} of ${session.totalBunches} bunches`
-                : `${unitsPacked} / ${session.opl.totalUnits ?? '—'}`
-            }
+            value={`${bunchesPacked} of ${session.targets.targetBunches} bunches`}
           />
           {/* Surfaced so a packer can sanity-check they have Bunch(10) and not
               Bunch(12): a wrong-size bunch passes both Rule 1 and Rule 3 today

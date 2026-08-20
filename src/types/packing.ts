@@ -58,24 +58,40 @@ export interface OrderPickList {
   rows: OplRow[];
 }
 
-/** Derived session parameters — everything Rules 1 and 3 need, computed once. */
-export interface PackingSession {
-  opl: OrderPickList;
-  /** `int(custom_packrate)` — the per-box cap, in the OPL's own unit. */
-  capPerBox: number;
-  /** `int(custom_total_stems) / capPerBox`, rounded up. The M in "Box N of M". */
+/**
+ * Targets read from the SALES ORDER line, not the OPL.
+ *
+ * The OPL allocator is broken (§8.3), so its quantities cannot be trusted. The
+ * SO is the source of truth for what a box should hold; the OPL is still the
+ * source for shelf, warehouse and the payload's `custom_order_pick_list`.
+ */
+export interface SalesOrderTargets {
+  salesOrder: string;
+  itemCode: string | null;
+  /** The line's uom, e.g. `Bunch(10)` or `Stems`. */
+  uom: string;
+  conversionFactor: number;
+  /** `stock_qty` — the order in stems. Display only. */
+  stockQty: number;
+  /** `qty` converted to bunches. The order target. */
+  targetBunches: number;
+  /** `custom_packrate` converted to bunches. The per-box cap. */
+  capBunches: number;
+  /** `custom_number_of_boxes`, taken directly. The M in "Box N of M". */
   boxCount: number;
+}
 
-  // ── DISPLAY ONLY. Packers scan bunches and think in bunches; stems are an
-  // ERP unit. None of these participate in Rule 1 — the cap is still enforced
-  // in the OPL's own unit so like is compared with like.
-  /** Parsed from the OPL row's `uom`, e.g. 10 from `Bunch(10)`. Null when the
-   *  OPL's uom is not in `Name(n)` form — `Stems`-uom OPLs exist. */
-  stemsPerBunch: number | null;
-  /** How many bunches fit a box. Null when `stemsPerBunch` is. */
-  capBunches: number | null;
-  /** How many bunches the whole order is. Null when `stemsPerBunch` is. */
-  totalBunches: number | null;
+/**
+ * Everything a packing session needs, resolved once on OPL selection.
+ *
+ * EVERYTHING IS COUNTED IN BUNCHES — the cap, the target and the running
+ * totals. That is both what a packer thinks in and what the SO gives us
+ * directly, so there is no unit ambiguity left to carry: one scan is one bunch.
+ */
+export interface PackingSession {
+  /** Shelf, warehouse, item rows, and the id sent as `custom_order_pick_list`. */
+  opl: OrderPickList;
+  targets: SalesOrderTargets;
 }
 
 /** A bunch resolved from its QR, ready to validate and submit. */

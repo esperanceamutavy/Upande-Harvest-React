@@ -5,7 +5,8 @@ import { QrCode } from 'lucide-react-native';
 
 import { useFarm } from '../../features/station/useFarm';
 import { useSubmitGrading } from '../../features/grading/useSubmitGrading';
-import { detectGradingQrType, extractGradingQrValue } from '../../features/grading/gradingQr';
+import { detectGradingQrType } from '../../features/scanning/qr';
+import { extractScannedId } from '../../lib/qr';
 import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOverlay';
 import { playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
@@ -169,7 +170,7 @@ export default function GradingScreen() {
   }
 
   function handleValue(slot: Slot, raw: string) {
-    const value = extractGradingQrValue(raw);
+    const value = extractScannedId(raw);
     if (!value) return;
     if (slot === 'grader') latchGrader(value);
     else void submitBunch(value);
