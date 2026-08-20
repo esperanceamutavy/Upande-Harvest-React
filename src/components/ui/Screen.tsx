@@ -3,8 +3,8 @@
 // Port of packhouse's src/core/ui/Screen.tsx (mark-judah/upande-packhouse),
 // adapted per RESTYLE_PLAN.md Phase 2:
 //   - Ionicons `menu-outline` → lucide `Menu` (hard constraint 1)
-//   - packhouse's SideMenu → our existing AppDrawer, which already matches
-//     structurally (isOpen/onClose rather than visible/onClose)
+//   - packhouse's SideMenu → our existing AppDrawer, now mounted ONCE by
+//     (app)/_layout.tsx; this component only calls openDrawer() on the context
 //   - no useTenant() / instanceUrl (hard constraints 4 and 5)
 //
 // DIVERGENCE FROM THE REFERENCE: packhouse's Screen has no back prop, because
@@ -28,7 +28,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, Menu } from 'lucide-react-native';
 
-import { AppDrawer } from '../AppDrawer';
+import { useDrawer } from '../../features/navigation/drawerContext';
 import { Button } from './Button';
 import { colors, fontFamily, fontSize, spacing, typography } from './theme';
 
@@ -40,7 +40,8 @@ interface ScreenProps {
   onRefresh?: () => Promise<void> | void;
   /**
    * Pushed routes only. Replaces the hamburger with a back chevron in the same
-   * leading slot; the drawer is not mounted. Tab destinations omit this.
+   * leading slot, so the drawer is unreachable from this screen. Tab
+   * destinations omit this.
    */
   onBack?: () => void;
   /** Hides the hamburger and the drawer entirely. The title stays centred. */
@@ -68,10 +69,13 @@ export function Screen({
   footer,
 }: ScreenProps) {
   const [refreshing, setRefreshing] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
 
-  // A back chevron and a hamburger share one leading slot, so `onBack` wins and
-  // the drawer stays unmounted — there would be no way to open it anyway.
+  // The drawer is a single instance mounted by (app)/_layout.tsx; this screen
+  // only asks for it to open. It used to own `menuOpen` and render its own
+  // AppDrawer, which meant one instance per screen and a cold mount per open.
+  const { openDrawer } = useDrawer();
+
+  // A back chevron and a hamburger share one leading slot, so `onBack` wins.
   const showMenu = !hideMenu && !onBack;
 
   const handleRefresh = onRefresh
@@ -145,7 +149,7 @@ export function Screen({
             </Pressable>
           ) : showMenu ? (
             <Pressable
-              onPress={() => setMenuOpen(true)}
+              onPress={openDrawer}
               hitSlop={10}
               style={styles.menuBtn}
               accessibilityRole="button"
@@ -163,8 +167,6 @@ export function Screen({
           <View style={styles.menuBtn} />
         </View>
       ) : null}
-
-      {showMenu ? <AppDrawer isOpen={menuOpen} onClose={() => setMenuOpen(false)} /> : null}
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}

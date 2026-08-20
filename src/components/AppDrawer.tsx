@@ -2,14 +2,15 @@ import { useEffect, useState } from 'react';
 import {
   Alert,
   Animated,
+  BackHandler,
   Dimensions,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LogOut, X } from 'lucide-react-native';
 
@@ -26,8 +27,18 @@ interface AppDrawerProps {
   onClose: () => void;
 }
 
+// Rendered ONCE, by the (app) layout — see drawerContext. Not a Modal: on
+// Android a Modal is a native window, and constructing/showing one per open was
+// a large part of the observed delay. An absolutely-positioned overlay rendered
+// as a LATER SIBLING of <Tabs> paints above the tab bar with no native window
+// involved, and the panel animation was already hand-rolled (the Modal used
+// animationType="none"), so nothing is lost visually.
+//
+// The trade is Modal's `onRequestClose`, which handled the Android hardware
+// back button. BackHandler below restores that explicitly.
 export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const fullName = useAuthStore((s) => s.fullName);
   const email = useAuthStore((s) => s.email);
   const farm = useFarm();
@@ -67,6 +78,17 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
     }
   }, [isOpen, translateX]);
 
+  // Android hardware back closes the drawer instead of leaving the screen.
+  // Replaces the `onRequestClose` the Modal used to provide.
+  useEffect(() => {
+    if (!isOpen) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true; // consumed — do not also pop the route
+    });
+    return () => sub.remove();
+  }, [isOpen, onClose]);
+
   function navigate(route: string) {
     onClose();
     router.push(route as never);
@@ -99,26 +121,24 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
 
   const initial = fullName && fullName.length > 0 ? fullName[0].toUpperCase() : 'U';
 
-  // Render nothing at all when closed. Screen mounts an AppDrawer per screen
-  // and the tab navigator retains screens, so a `visible={false}` Modal would
-  // leave one live Modal host per visited tab. Unmounting keeps exactly one.
+  // Render nothing when closed. This started as a workaround for one Modal host
+  // per screen; with a single hoisted instance that reason is gone, but it is
+  // now REQUIRED for a different one: an absolute-fill overlay left mounted
+  // would swallow every touch on the screen beneath it.
   if (!mounted) return null;
 
   return (
-    <Modal
-      visible
-      transparent
-      animationType="none"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
+    <View style={styles.host} pointerEvents="box-none">
       {/* Dim overlay — tap to close */}
       <Pressable style={styles.overlay} onPress={onClose} />
 
       {/* Drawer panel */}
       <Animated.View style={[styles.panel, { transform: [{ translateX }] }]}>
-        {/* Header */}
-        <View style={styles.header}>
+        {/* Header. paddingTop comes from the live inset rather than a constant:
+            without a Modal there is no `statusBarTranslucent` guarantee, so how
+            far the overlay extends under the status bar depends on the platform's
+            edge-to-edge setting. Using the inset is correct either way. */}
+        <View style={[styles.header, { paddingTop: Math.max(insets.top + spacing.md, 24) }]}>
           <View style={styles.headerTop}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>{initial}</Text>
@@ -156,13 +176,24 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
           </Pressable>
         </View>
       </Animated.View>
-    </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // Fills the (app) layout and sits above <Tabs> by sibling order. box-none so
+  // only the dim layer and the panel take touches.
+  // Written out rather than spread: `StyleSheet.absoluteFill` is a registered
+  // style ID, not an object, so the previous `...StyleSheet.absoluteFill`
+  // contributed nothing — harmless inside a Modal, which fills by itself, but
+  // not here.
+  host: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, elevation: 100 },
   overlay: {
-    ...StyleSheet.absoluteFill,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.4)',
   },
   panel: {
@@ -181,7 +212,6 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: colors.surface,
     paddingHorizontal: spacing.lg,
-    paddingTop: 48,
     paddingBottom: spacing.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,

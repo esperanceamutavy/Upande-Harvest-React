@@ -7,9 +7,11 @@ import {
   PackagePlus,
   type LucideIcon,
 } from 'lucide-react-native';
-import type { ColorValue } from 'react-native';
+import { View, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AppDrawer } from '../../components/AppDrawer';
+import { DrawerProvider, useDrawer } from '../../features/navigation/drawerContext';
 import { colors } from '../../components/ui/theme';
 
 // Bottom tab bar mirroring the v2 reference: icon-only, active = primary, inactive = muted,
@@ -22,10 +24,18 @@ function tabIcon(Icon: LucideIcon) {
   };
 }
 
-export default function AppLayout() {
+// ONE AppDrawer for the whole app, mounted here as a later sibling of <Tabs> so
+// it paints above the tab bar without needing a native Modal window. Screen's
+// hamburger calls openDrawer() from the context instead of rendering its own
+// copy — previously every screen held an instance, and because the drawer
+// unmounts when closed, each open paid for a cold mount of the full subtree.
+function AppTabs() {
   const insets = useSafeAreaInsets();
+  const { isOpen, closeDrawer } = useDrawer();
+
   return (
-    <Tabs
+    <View style={{ flex: 1 }}>
+      <Tabs
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
@@ -53,6 +63,17 @@ export default function AppLayout() {
       <Tabs.Screen name="grading" options={{ href: null }} />
       <Tabs.Screen name="packing" options={{ href: null }} />
       <Tabs.Screen name="stock-entry/[id]" options={{ href: null }} />
-    </Tabs>
+      </Tabs>
+
+      <AppDrawer isOpen={isOpen} onClose={closeDrawer} />
+    </View>
+  );
+}
+
+export default function AppLayout() {
+  return (
+    <DrawerProvider>
+      <AppTabs />
+    </DrawerProvider>
   );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -15,7 +15,7 @@ import { Menu } from 'lucide-react-native';
 import { useAuthStore } from '../../stores/auth';
 import { useDashboardStats } from '../../features/dashboard/useDashboardStats';
 import { WORKFLOW_ITEMS } from '../../features/navigation/drawerItems';
-import { AppDrawer } from '../../components/AppDrawer';
+import { useDrawer } from '../../features/navigation/drawerContext';
 import { Button } from '../../components/ui/Button';
 import { StatTile } from '../../components/ui/StatTile';
 import { colors, fontFamily, fontSize, radii, spacing } from '../../components/ui/theme';
@@ -42,7 +42,8 @@ export default function Dashboard() {
   const fullName = useAuthStore((s) => s.fullName);
   const firstName = useMemo(() => (fullName ?? '').split(' ')[0] || 'there', [fullName]);
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  // Single hoisted drawer, mounted by (app)/_layout.tsx.
+  const { openDrawer } = useDrawer();
   const { data, isLoading, isError, isRefetching, refetch } = useDashboardStats();
 
   const onRefresh = useCallback(() => {
@@ -58,7 +59,7 @@ export default function Dashboard() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Pressable onPress={() => setDrawerOpen(true)} style={styles.menuBtn} hitSlop={8}>
+          <Pressable onPress={openDrawer} style={styles.menuBtn} hitSlop={8}>
             <Menu size={26} color={colors.primary} />
           </Pressable>
           <View style={styles.greeting}>
@@ -125,7 +126,6 @@ export default function Dashboard() {
         )}
       </ScrollView>
 
-      <AppDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} />
     </SafeAreaView>
   );
 }
