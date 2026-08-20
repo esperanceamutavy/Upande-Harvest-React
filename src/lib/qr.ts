@@ -42,6 +42,16 @@ export function extractScannedId(raw: string): string | null {
         if (v != null && String(v).trim().length > 0) return String(v).trim();
       }
     }
+    // LEGACY COLDROOM LABELS — do NOT remove. Some old printed labels are
+    // shaped {"<id>":"bucket"}: the id is the KEY, and the VALUE is the literal
+    // string "bucket". Those labels are still in circulation. Checked after the
+    // named keys so a well-formed label always wins.
+    if (parsed && typeof parsed === 'object') {
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (v === 'bucket' && k.trim()) return k.trim();
+      }
+    }
+
     // Parsed, but nothing recognisable in it — a bare JSON string or number
     // still yields a usable value; an unkeyed object does not.
     if (typeof parsed === 'string' || typeof parsed === 'number') {

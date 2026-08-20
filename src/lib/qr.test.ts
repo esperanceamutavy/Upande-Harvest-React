@@ -46,6 +46,16 @@ test('empty input yields null rather than an empty id', () => {
   assert.equal(extractScannedId('   '), null);
 });
 
+test('handles the legacy coldroom label where the id is the KEY', () => {
+  // {"<id>":"bucket"} — old printed labels still in circulation.
+  assert.equal(extractScannedId('{"BUCKET-1849":"bucket"}'), 'BUCKET-1849');
+  assert.equal(extractScannedId('{"Coldroom Bucket - 2880":"bucket"}'), 'Coldroom Bucket - 2880');
+});
+
+test('a named key beats the legacy key-is-the-id rule', () => {
+  assert.equal(extractScannedId('{"bucket_id":"BUCKET-9","BUCKET-8":"bucket"}'), 'BUCKET-9');
+});
+
 test('an object with no recognised key is not mistaken for an id', () => {
   // Better to send the blob and get a clean "not found" than to invent an id.
   assert.equal(extractScannedId('{"unrelated":"x"}'), '{"unrelated":"x"}');

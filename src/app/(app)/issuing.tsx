@@ -10,11 +10,13 @@ import { useIssueBucketNoOrder } from '../../features/issuing/useIssueBucketNoOr
 import { playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
 import { extractFrappeError } from '../../lib/api';
+import { extractScannedId } from '../../lib/qr';
 import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOverlay';
 import { Button } from '../../components/ui/Button';
 import { Card, Notice, type NoticeTone } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
 import { Screen } from '../../components/ui/Screen';
+import { Segmented } from '../../components/ui/Segmented';
 import { colors, radii, spacing } from '../../components/ui/theme';
 import type { XfloraReadySaleOrderItem } from '../../types/xflora';
 
@@ -29,25 +31,35 @@ function isValidJson(text: string): boolean {
   }
 }
 
-/** Extract the scanned bucket id. */
-function extractBucketId(raw: string): string | null {
-  try {
-    const parsed = JSON.parse(raw.trim()) as unknown;
-    if (parsed && typeof parsed === 'object') {
-      const o = parsed as Record<string, unknown>;
-      if (o.coldroom_bucket != null) return String(o.coldroom_bucket);
-      // LEGACY-QR COMPAT — do NOT remove. Some old coldroom labels are shaped
-      // {"<id>":"bucket"}: the bucket id is the KEY whose value is the literal
-      // string "bucket". Old printed labels still exist in the coldroom.
-      // (Ported from xflora_issue_from_coldstore.dart.)
-      for (const [k, v] of Object.entries(o)) {
-        if (v === 'bucket') return k;
-      }
-    }
-  } catch {
-    // fall through
-  }
-  return null;
+// Two ways in, and SCAN-FIRST is the default.
+//
+//   scan  — scan any bucket with no order selected. getBucketIssueInfo routes
+//           it: allocated → issue against the sale_order_item it returns;
+//           unallocated → offer the no-order fallback behind a confirm;
+//           already issued → warn. This is the normal packhouse case, because
+//           a packer holds a bucket, not an order.
+//   order — pick an order, load its packing list, work through it. Kept for
+//           working an order deliberately; no longer the only way in.
+//
+// The bucket id is unwrapped with the shared src/lib/qr.ts extractor, which
+// also covers the legacy {"<id>":"bucket"} coldroom labels.
+
+type IssueMode = 'scan' | 'order';
+
+const MODE_OPTIONS = [
+  { value: 'scan', label: 'Scan bucket' },
+  { value: 'order', label: 'By order' },
+] as const satisfies readonly { value: IssueMode; label: string }[];
+
+const MAX_LOG_ROWS = 12;
+
+interface IssueLogRow {
+  id: string;
+  bucketId: string;
+  outcome: string;
+  detail: string;
+  tone: NoticeTone;
+  time: string;
 }
 
 export default function IssuingScreen() {
@@ -57,6 +69,7 @@ export default function IssuingScreen() {
   const allocationMut = useBucketIssueInfo();
   const noOrderMut = useIssueBucketNoOrder();
 
+  const [mode, setMode] = useState<IssueMode>('scan');
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [orderQuery, setOrderQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -68,6 +81,8 @@ export default function IssuingScreen() {
   // Set when a scan turns out to have no allocation anywhere. Holds the bucket
   // id awaiting an explicit confirmation of the no-order fallback.
   const [pendingUnallocated, setPendingUnallocated] = useState<string | null>(null);
+  const [log, setLog] = useState<IssueLogRow[]>([]);
+  const seqRef = useRef(0);
 
   const isSettingProgrammaticallyRef = useRef(false);
   const isProcessingRef = useRef(false);
@@ -89,12 +104,6 @@ export default function IssuingScreen() {
     return orders.filter((o) => o.toLowerCase().includes(q));
   }, [orders, orderQuery]);
 
-  function warn(text: string) {
-    setFeedback({ tone: 'warn', text });
-    playError();
-    haptics.medium();
-  }
-
   function resetBucket() {
     setLoading(false);
     isProcessingRef.current = false;
@@ -104,51 +113,6 @@ export default function IssuingScreen() {
       isSettingProgrammaticallyRef.current = false;
     }, 0);
     bucketRef.current?.focus();
-  }
-
-  /**
-   * A scanned bucket that is not on the selected order's packing list. Ask the
-   * server what its allocation really is:
-   *   not_allocated  → offer the no-order fallback, behind a confirmation
-   *   already_issued → nothing to do
-   *   ok             → it belongs to a DIFFERENT order; say which, and do not
-   *                    offer to drop the link. Re-selecting that order is the
-   *                    correct move, and it keeps the bucket→order association.
-   */
-  async function resolveUnallocated(bucketId: string) {
-    setPendingUnallocated(null);
-    try {
-      const info = await allocationMut.mutateAsync(bucketId);
-
-      if (info.status === 'not_allocated') {
-        setPendingUnallocated(bucketId);
-        setFeedback({
-          tone: 'warn',
-          text: `${bucketId} has no order allocation. Shelving may not have run for it.`,
-        });
-        playError();
-        haptics.medium();
-        return;
-      }
-
-      if (info.status === 'already_issued') {
-        setFeedback({ tone: 'warn', text: info.message });
-        playError();
-        return;
-      }
-
-      const where = info.salesOrder ?? info.oplName ?? 'another order';
-      setFeedback({
-        tone: 'danger',
-        text: `${bucketId} is allocated to ${where}, not ${selectedOrder}. Select that order to issue it.`,
-      });
-      playError();
-    } catch (e) {
-      setFeedback({ tone: 'danger', text: extractFrappeError(e) });
-      playError();
-    } finally {
-      resetBucket();
-    }
   }
 
   /** The explicit, opt-in fallback. Permanently drops the bucket→order link. */
@@ -168,6 +132,16 @@ export default function IssuingScreen() {
     } finally {
       resetBucket();
     }
+  }
+
+  function addLog(bucketId: string, outcome: string, detail: string, tone: NoticeTone) {
+    seqRef.current += 1;
+    setLog((prev) =>
+      [
+        { id: `${seqRef.current}`, bucketId, outcome, detail, tone, time: new Date().toLocaleTimeString() },
+        ...prev,
+      ].slice(0, MAX_LOG_ROWS),
+    );
   }
 
   function markIssued(bucket: string) {
@@ -194,15 +168,114 @@ export default function IssuingScreen() {
     }
   }
 
+  /** POST the issue for a bucket whose sale_order_item is already known. */
+  async function issueAgainst(
+    bucketId: string,
+    saleOrderItem: string,
+    oplName: string,
+    context: string,
+  ) {
+    isProcessingRef.current = true;
+    setLoading(true);
+    setFeedback(null);
+    try {
+      const res = await issueMut.mutateAsync({ bucketId, saleOrderItem, oplName });
+      markIssued(bucketId);
+      playSubmit();
+      setFeedback({ tone: 'success', text: res.message });
+      addLog(bucketId, 'Issued', context, 'success');
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      if (status === 409) {
+        // Server says it's already issued — authoritative; self-heal the badge.
+        markIssued(bucketId);
+        playError();
+        const message =
+          (e as { message?: string }).message || 'Already issued to this sale order item.';
+        setFeedback({ tone: 'warn', text: message });
+        addLog(bucketId, 'Already issued', message, 'warn');
+      } else {
+        playError();
+        haptics.medium();
+        const message = extractFrappeError(e);
+        setFeedback({ tone: 'danger', text: message });
+        addLog(bucketId, 'Failed', message, 'danger');
+      }
+    } finally {
+      resetBucket();
+    }
+  }
+
+  /**
+   * SCAN-FIRST. getBucketIssueInfo is the router for the whole screen — it
+   * already returns sale_order_item, opl_name, sales_order, variety and shelf,
+   * which is everything needed to issue without the packer picking an order.
+   */
+  async function resolveAndIssue(bucketId: string) {
+    setPendingUnallocated(null);
+    isProcessingRef.current = true;
+    setLoading(true);
+    setFeedback(null);
+    try {
+      const info = await allocationMut.mutateAsync(bucketId);
+
+      if (info.status === 'not_allocated') {
+        setPendingUnallocated(bucketId);
+        setFeedback({
+          tone: 'warn',
+          text: `${bucketId} has no order allocation. Shelving may not have run for it.`,
+        });
+        playError();
+        haptics.medium();
+        addLog(bucketId, 'No allocation', 'Awaiting confirmation to issue without an order.', 'warn');
+        resetBucket();
+        return;
+      }
+
+      if (info.status === 'already_issued') {
+        setFeedback({ tone: 'warn', text: info.message });
+        playError();
+        addLog(bucketId, 'Already issued', info.message, 'warn');
+        resetBucket();
+        return;
+      }
+
+      if (!info.saleOrderItem) {
+        const text = `${bucketId} is allocated to ${info.oplName ?? 'an order'} but has no sale order item.`;
+        setFeedback({ tone: 'danger', text });
+        playError();
+        addLog(bucketId, 'Unusable', text, 'danger');
+        resetBucket();
+        return;
+      }
+
+      // Allocated. Issue straight against what the lookup returned — no manual
+      // order selection needed.
+      isProcessingRef.current = false;
+      setLoading(false);
+      const where = info.salesOrder ?? info.oplName ?? '—';
+      await issueAgainst(
+        bucketId,
+        info.saleOrderItem,
+        info.oplName ?? '',
+        [info.variety, info.shelf ? `shelf ${info.shelf}` : null, where].filter(Boolean).join(' · '),
+      );
+    } catch (e) {
+      const message = extractFrappeError(e);
+      setFeedback({ tone: 'danger', text: message });
+      playError();
+      addLog(bucketId, 'Lookup failed', message, 'danger');
+      resetBucket();
+    } finally {
+      isProcessingRef.current = false;
+      setLoading(false);
+    }
+  }
+
   async function handleScan(raw: string) {
     if (isProcessingRef.current) return;
-    if (!selectedOrder) {
-      warn('Please select an Order first.');
-      resetBucket();
-      return;
-    }
 
-    const bucketId = extractBucketId(raw);
+    const bucketId = extractScannedId(raw);
     if (!bucketId) {
       setFeedback({ tone: 'danger', text: 'Could not extract a valid bucket ID from the scan.' });
       playError();
@@ -210,59 +283,30 @@ export default function IssuingScreen() {
       return;
     }
 
-    const matched = items.find((it) => it.bucket.toLowerCase() === bucketId.toLowerCase());
-    if (!matched || !matched.bucket) {
-      // Not in THIS order's packing list — but that is not the same as having no
-      // allocation at all, and only the latter makes the no-order fallback safe.
-      // Ask the server which it is before offering anything destructive.
-      await resolveUnallocated(bucketId);
-      return;
-    }
-    if (!matched.saleOrderItem) {
-      setFeedback({ tone: 'danger', text: `Sale Order Item not found for bucket ${bucketId}.` });
-      playError();
-      resetBucket();
-      return;
-    }
-    // Local pre-empt — matched item already known issued; skip the round-trip.
-    // Backend 409 remains the safety net for anything local state doesn't know.
-    if (matched.isIssued) {
-      setFeedback({ tone: 'warn', text: `Bucket ${bucketId} is already issued.` });
-      playError();
-      resetBucket();
-      return;
+    // In order mode, a bucket already on the loaded packing list is issued from
+    // that row: it saves a round-trip and keeps the local already-issued
+    // pre-empt. Anything else — including every scan in scan mode — goes to the
+    // server to be routed.
+    if (mode === 'order' && selectedOrder) {
+      const matched = items.find((it) => it.bucket.toLowerCase() === bucketId.toLowerCase());
+      if (matched?.bucket && matched.saleOrderItem) {
+        if (matched.isIssued) {
+          setFeedback({ tone: 'warn', text: `Bucket ${bucketId} is already issued.` });
+          playError();
+          resetBucket();
+          return;
+        }
+        await issueAgainst(
+          bucketId,
+          matched.saleOrderItem,
+          matched.oplName,
+          `${matched.variety} · ${selectedOrder}`,
+        );
+        return;
+      }
     }
 
-    isProcessingRef.current = true;
-    setLoading(true);
-    setFeedback(null);
-    try {
-      const res = await issueMut.mutateAsync({
-        bucketId,
-        saleOrderItem: matched.saleOrderItem,
-        oplName: matched.oplName,
-      });
-      markIssued(matched.bucket);
-      playSubmit();
-      setFeedback({ tone: 'success', text: res.message });
-    } catch (e) {
-      const status = (e as { status?: number }).status;
-      if (status === 409) {
-        // Server says it's already issued — authoritative; self-heal the badge.
-        markIssued(matched.bucket);
-        playError();
-        setFeedback({
-          tone: 'warn',
-          text: (e as { message?: string }).message || 'Already issued to this sale order item.',
-        });
-      } else {
-        playError();
-        haptics.medium();
-        setFeedback({ tone: 'danger', text: extractFrappeError(e) });
-      }
-    } finally {
-      resetBucket();
-    }
+    await resolveAndIssue(bucketId);
   }
 
   function onChangeBucket(text: string) {
@@ -279,11 +323,27 @@ export default function IssuingScreen() {
     void handleScan(raw);
   }
 
-  const scanEnabled = !!selectedOrder && items.length > 0 && !loading;
+  // Scan mode needs no order and no loaded list — that is the whole point.
+  // Order mode still waits for a list, so a packer is not scanning into nothing.
+  const scanEnabled = !loading && (mode === 'scan' || (!!selectedOrder && items.length > 0));
 
   return (
     <Screen title="Issue From Coldstore">
-      {/* Order type-ahead */}
+      <Card title="Mode">
+        <Segmented
+          value={mode}
+          options={MODE_OPTIONS}
+          onChange={(next) => {
+            setMode(next);
+            setFeedback(null);
+            setPendingUnallocated(null);
+            bucketRef.current?.focus();
+          }}
+        />
+      </Card>
+
+      {/* Order type-ahead — order mode only. Scanning does not need it. */}
+      {mode === 'order' ? (
       <Card title="Select order">
         <Field label="Sale Order">
           <View>
@@ -321,15 +381,16 @@ export default function IssuingScreen() {
           </View>
         </Field>
       </Card>
+      ) : null}
 
-      {ordersQuery.error ? (
+      {mode === 'order' && ordersQuery.error ? (
         <Notice tone="danger">
           Failed to load orders. Pull the drawer closed and reopen to retry.
         </Notice>
       ) : null}
 
-      {/* Packing list */}
-      {itemsLoading ? (
+      {/* Packing list — order mode only */}
+      {mode !== 'order' ? null : itemsLoading ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator size="small" color={colors.text} />
           <Text style={styles.hint}>Loading items…</Text>
@@ -346,18 +407,21 @@ export default function IssuingScreen() {
         </Card>
       ) : null}
 
-      {/* Bucket scan — only after an order is selected */}
-      {selectedOrder ? (
+      {/* Bucket scan. Available immediately in scan mode — that is the point. */}
+      {mode === 'scan' || selectedOrder ? (
         <Card title="Scan bucket">
           <Field label="Bucket ID">
             <View style={styles.scanRow}>
               <TextInput
                 ref={bucketRef}
+                autoFocus={mode === 'scan'}
                 style={[styles.input, styles.scanInput, !scanEnabled && styles.inputDisabled]}
                 value={bucketInput}
                 onChangeText={onChangeBucket}
                 autoCapitalize="characters"
-                placeholder={loading ? 'Issuing…' : scanEnabled ? 'Scan bucket QR code…' : 'No items to issue'}
+                placeholder={
+                  loading ? 'Issuing…' : scanEnabled ? 'Scan bucket QR code…' : 'No items to issue'
+                }
                 placeholderTextColor={colors.muted}
                 editable={scanEnabled}
               />
@@ -399,6 +463,35 @@ export default function IssuingScreen() {
                 bucketRef.current?.focus();
               }}
             />
+          </View>
+        </Card>
+      ) : null}
+
+      {log.length > 0 ? (
+        <Card title="This session">
+          <View style={styles.log}>
+            {log.map((row) => (
+              <View key={row.id} style={styles.logRow}>
+                <View style={styles.logHead}>
+                  <Text
+                    style={[
+                      styles.logBucket,
+                      row.tone === 'danger' && styles.logError,
+                      row.tone === 'warn' && styles.logWarn,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {row.bucketId}
+                  </Text>
+                  <Text style={styles.logTime}>
+                    {row.outcome} · {row.time}
+                  </Text>
+                </View>
+                <Text style={styles.logDetail} numberOfLines={2}>
+                  {row.detail}
+                </Text>
+              </View>
+            ))}
           </View>
         </Card>
       ) : null}
@@ -539,4 +632,18 @@ const styles = StyleSheet.create({
   downgradeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
   downgradeText: { fontSize: 13, color: colors.warning, fontWeight: '500' },
   confirmRow: { gap: spacing.sm, marginTop: spacing.md },
+
+  log: { gap: spacing.sm },
+  logRow: {
+    gap: 2,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.borderLight,
+  },
+  logHead: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
+  logBucket: { fontSize: 13, fontWeight: '600', color: colors.primary, flexShrink: 1 },
+  logTime: { fontSize: 12, color: colors.muted },
+  logDetail: { fontSize: 13, color: colors.textSecondary },
+  logWarn: { color: colors.warning },
+  logError: { color: colors.error },
 });

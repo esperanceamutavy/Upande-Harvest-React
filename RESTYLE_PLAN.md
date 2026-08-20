@@ -289,6 +289,22 @@ On failure the script sets `http_status_code: 500`, plus the error text in **bot
 
 `excType` is still `undefined` for these errors — nothing branches on it, and nothing should start.
 
+#### Issuing — SCAN-FIRST is the default; order-first is an option
+
+`getBucketIssueInfo` is the router for the whole screen, which is what it was written for: it returns `sale_order_item`, `opl_name`, `sales_order`, `variety` and `shelf`, so a scan needs no manual order selection.
+
+| Scan outcome | Behaviour |
+|---|---|
+| **200 `ok`** | issue immediately via `issueBucketToSaleOrderItem` using the returned `sale_order_item` |
+| **404 `not_allocated`** | offer `issue_bucket_no_order` behind the explicit confirm — it permanently drops the bucket→order link |
+| **409 `already_issued`** | warn |
+
+**Order-first is retained as a mode**, for working an order deliberately. In that mode a bucket already on the loaded packing list is issued from that row — saving a round-trip and keeping the local already-issued pre-empt — and anything else falls through to the same server routing.
+
+*(This corrects an earlier constraint in this plan. "The allocated path is unchanged" forced order-first as the only way in, which defeated the point: a packer holds a bucket, not an order.)*
+
+The bucket id is unwrapped with `src/lib/qr.ts`, which also handles the legacy `{"<id>":"bucket"}` coldroom labels where the id is the KEY — covered by a test, since those labels are still in circulation and nothing else in the codebase would catch a regression.
+
 #### ✅ `grader` — no resolver needed. The shipped code is correct.
 
 **Employee docnames ARE the payroll numbers.** On this site `name == employee == employee_number`, e.g. `"869"`. So the badge value the QR carries is already the primary key the script looks up:
