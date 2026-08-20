@@ -5,10 +5,13 @@ import { CircleCheck, QrCode, TriangleAlert } from 'lucide-react-native';
 import { useXfloraReadySaleOrders } from '../../features/issuing/useXfloraReadySaleOrders';
 import { useXfloraReadySaleOrderItems } from '../../features/issuing/useXfloraReadySaleOrderItems';
 import { useIssueFromColdstore } from '../../features/issuing/useIssueFromColdstore';
+import { useBucketIssueInfo } from '../../features/issuing/useBucketIssueInfo';
+import { useIssueBucketNoOrder } from '../../features/issuing/useIssueBucketNoOrder';
 import { playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
 import { extractFrappeError } from '../../lib/api';
 import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOverlay';
+import { Button } from '../../components/ui/Button';
 import { Card, Notice, type NoticeTone } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
 import { Screen } from '../../components/ui/Screen';
@@ -51,6 +54,8 @@ export default function IssuingScreen() {
   const ordersQuery = useXfloraReadySaleOrders();
   const fetchItems = useXfloraReadySaleOrderItems();
   const issueMut = useIssueFromColdstore();
+  const allocationMut = useBucketIssueInfo();
+  const noOrderMut = useIssueBucketNoOrder();
 
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [orderQuery, setOrderQuery] = useState('');
@@ -60,6 +65,9 @@ export default function IssuingScreen() {
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackMsg | null>(null);
   const [scannerVisible, setScannerVisible] = useState(false);
+  // Set when a scan turns out to have no allocation anywhere. Holds the bucket
+  // id awaiting an explicit confirmation of the no-order fallback.
+  const [pendingUnallocated, setPendingUnallocated] = useState<string | null>(null);
 
   const isSettingProgrammaticallyRef = useRef(false);
   const isProcessingRef = useRef(false);
@@ -96,6 +104,70 @@ export default function IssuingScreen() {
       isSettingProgrammaticallyRef.current = false;
     }, 0);
     bucketRef.current?.focus();
+  }
+
+  /**
+   * A scanned bucket that is not on the selected order's packing list. Ask the
+   * server what its allocation really is:
+   *   not_allocated  → offer the no-order fallback, behind a confirmation
+   *   already_issued → nothing to do
+   *   ok             → it belongs to a DIFFERENT order; say which, and do not
+   *                    offer to drop the link. Re-selecting that order is the
+   *                    correct move, and it keeps the bucket→order association.
+   */
+  async function resolveUnallocated(bucketId: string) {
+    setPendingUnallocated(null);
+    try {
+      const info = await allocationMut.mutateAsync(bucketId);
+
+      if (info.status === 'not_allocated') {
+        setPendingUnallocated(bucketId);
+        setFeedback({
+          tone: 'warn',
+          text: `${bucketId} has no order allocation. Shelving may not have run for it.`,
+        });
+        playError();
+        haptics.medium();
+        return;
+      }
+
+      if (info.status === 'already_issued') {
+        setFeedback({ tone: 'warn', text: info.message });
+        playError();
+        return;
+      }
+
+      const where = info.salesOrder ?? info.oplName ?? 'another order';
+      setFeedback({
+        tone: 'danger',
+        text: `${bucketId} is allocated to ${where}, not ${selectedOrder}. Select that order to issue it.`,
+      });
+      playError();
+    } catch (e) {
+      setFeedback({ tone: 'danger', text: extractFrappeError(e) });
+      playError();
+    } finally {
+      resetBucket();
+    }
+  }
+
+  /** The explicit, opt-in fallback. Permanently drops the bucket→order link. */
+  async function confirmIssueNoOrder(bucketId: string) {
+    setPendingUnallocated(null);
+    setFeedback(null);
+    try {
+      const res = await noOrderMut.mutateAsync(bucketId);
+      playSubmit();
+      const shelf =
+        res.removedFromShelf != null ? ` · ${res.removedFromShelf} shelf row(s) cleared` : '';
+      setFeedback({ tone: 'success', text: `${res.message}${shelf}` });
+    } catch (e) {
+      playError();
+      haptics.medium();
+      setFeedback({ tone: 'danger', text: extractFrappeError(e) });
+    } finally {
+      resetBucket();
+    }
   }
 
   function markIssued(bucket: string) {
@@ -140,12 +212,10 @@ export default function IssuingScreen() {
 
     const matched = items.find((it) => it.bucket.toLowerCase() === bucketId.toLowerCase());
     if (!matched || !matched.bucket) {
-      setFeedback({
-        tone: 'danger',
-        text: `Bucket ${bucketId} is not allocated to Order ${selectedOrder}.`,
-      });
-      playError();
-      resetBucket();
+      // Not in THIS order's packing list — but that is not the same as having no
+      // allocation at all, and only the latter makes the no-order fallback safe.
+      // Ask the server which it is before offering anything destructive.
+      await resolveUnallocated(bucketId);
       return;
     }
     if (!matched.saleOrderItem) {
@@ -306,6 +376,33 @@ export default function IssuingScreen() {
 
       {feedback ? <Notice tone={feedback.tone}>{feedback.text}</Notice> : null}
 
+      {pendingUnallocated ? (
+        <Card title="Issue without an order">
+          <Notice tone="warn">
+            {pendingUnallocated} has no Pick List allocation. Issuing it without an order clears
+            its shelf rows and permanently drops the bucket&rsquo;s link to any order. Only do
+            this if the bucket really is unallocated — if shelving simply has not run yet,
+            allocate it first instead.
+          </Notice>
+          <View style={styles.confirmRow}>
+            <Button
+              label="Issue without order"
+              loading={noOrderMut.isPending}
+              onPress={() => void confirmIssueNoOrder(pendingUnallocated)}
+            />
+            <Button
+              label="Cancel"
+              variant="outline"
+              onPress={() => {
+                setPendingUnallocated(null);
+                setFeedback(null);
+                bucketRef.current?.focus();
+              }}
+            />
+          </View>
+        </Card>
+      ) : null}
+
       <BarcodeScannerOverlay
         visible={scannerVisible}
         onScan={handleCameraScan}
@@ -441,4 +538,5 @@ const styles = StyleSheet.create({
   cardRowValue: { fontSize: 13, fontWeight: '500', color: colors.primary, flexShrink: 1, textAlign: 'right' },
   downgradeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
   downgradeText: { fontSize: 13, color: colors.warning, fontWeight: '500' },
+  confirmRow: { gap: spacing.sm, marginTop: spacing.md },
 });

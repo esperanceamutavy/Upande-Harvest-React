@@ -4,6 +4,7 @@ import {
   Hexagon,
   LayoutGrid,
   PackageCheck,
+  PackageOpen,
   PackagePlus,
   Settings,
   Monitor,
@@ -32,6 +33,7 @@ export const WORKFLOW_ITEMS: DrawerItem[] = [
   { label: 'Bucket Transfer', icon: ArrowLeftRight, route: '/bucket-transfer' },
   { label: 'Shelving', icon: LayoutGrid, route: '/shelving' },
   { label: 'Issuing', icon: PackageCheck, route: '/issuing' },
+  { label: 'Receiving Out', icon: PackageOpen, route: '/receiving-out' },
   { label: 'Grading', icon: Hexagon, route: '/grading' },
   { label: 'Packing', icon: Box, route: '/packing' },
   //
