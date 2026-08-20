@@ -1,16 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { AlertTriangle, CheckCircle2, QrCode } from 'lucide-react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { CircleCheck, QrCode, TriangleAlert } from 'lucide-react-native';
 
 import { useXfloraReadySaleOrders } from '../../features/issuing/useXfloraReadySaleOrders';
 import { useXfloraReadySaleOrderItems } from '../../features/issuing/useXfloraReadySaleOrderItems';
@@ -19,15 +9,15 @@ import { playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
 import { extractFrappeError } from '../../lib/api';
 import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOverlay';
-import { AppBar } from '../../components/ui/AppBar';
+import { Card, Notice, type NoticeTone } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
-import { Pill } from '../../components/ui/Pill';
+import { Screen } from '../../components/ui/Screen';
 import { colors, radii, spacing } from '../../components/ui/theme';
 import type { XfloraReadySaleOrderItem } from '../../types/xflora';
 
 const ACCENT = colors.accent;
 
-type FeedbackMsg = { type: 'success' | 'warning' | 'error'; text: string };
+type FeedbackMsg = { tone: NoticeTone; text: string };
 
 function isValidJson(text: string): boolean {
   try {
@@ -60,7 +50,6 @@ function extractBucketId(raw: string): string | null {
 }
 
 export default function IssuingScreen() {
-  const router = useRouter();
   const ordersQuery = useXfloraReadySaleOrders();
   const fetchItems = useXfloraReadySaleOrderItems();
   const issueMut = useIssueFromColdstore();
@@ -95,7 +84,7 @@ export default function IssuingScreen() {
   }, [orders, orderQuery]);
 
   function warn(text: string) {
-    setFeedback({ type: 'warning', text });
+    setFeedback({ tone: 'warn', text });
     playError();
     haptics.medium();
   }
@@ -130,7 +119,7 @@ export default function IssuingScreen() {
       setItems(result);
       bucketRef.current?.focus();
     } catch (e) {
-      setFeedback({ type: 'error', text: extractFrappeError(e) });
+      setFeedback({ tone: 'danger', text: extractFrappeError(e) });
       playError();
     }
   }
@@ -145,7 +134,7 @@ export default function IssuingScreen() {
 
     const bucketId = extractBucketId(raw);
     if (!bucketId) {
-      setFeedback({ type: 'error', text: 'Could not extract a valid bucket ID from the scan.' });
+      setFeedback({ tone: 'danger', text: 'Could not extract a valid bucket ID from the scan.' });
       playError();
       resetBucket();
       return;
@@ -154,7 +143,7 @@ export default function IssuingScreen() {
     const matched = items.find((it) => it.bucket.toLowerCase() === bucketId.toLowerCase());
     if (!matched || !matched.bucket) {
       setFeedback({
-        type: 'error',
+        tone: 'danger',
         text: `Bucket ${bucketId} is not allocated to Order ${selectedOrder}.`,
       });
       playError();
@@ -162,7 +151,7 @@ export default function IssuingScreen() {
       return;
     }
     if (!matched.saleOrderItem) {
-      setFeedback({ type: 'error', text: `Sale Order Item not found for bucket ${bucketId}.` });
+      setFeedback({ tone: 'danger', text: `Sale Order Item not found for bucket ${bucketId}.` });
       playError();
       resetBucket();
       return;
@@ -170,7 +159,7 @@ export default function IssuingScreen() {
     // Local pre-empt — matched item already known issued; skip the round-trip.
     // Backend 409 remains the safety net for anything local state doesn't know.
     if (matched.isIssued) {
-      setFeedback({ type: 'warning', text: `Bucket ${bucketId} is already issued.` });
+      setFeedback({ tone: 'warn', text: `Bucket ${bucketId} is already issued.` });
       playError();
       resetBucket();
       return;
@@ -187,7 +176,7 @@ export default function IssuingScreen() {
       });
       markIssued(matched.bucket);
       playSubmit();
-      setFeedback({ type: 'success', text: res.message });
+      setFeedback({ tone: 'success', text: res.message });
     } catch (e) {
       const status = (e as { status?: number }).status;
       if (status === 409) {
@@ -195,13 +184,13 @@ export default function IssuingScreen() {
         markIssued(matched.bucket);
         playError();
         setFeedback({
-          type: 'warning',
+          tone: 'warn',
           text: (e as { message?: string }).message || 'Already issued to this sale order item.',
         });
       } else {
         playError();
         haptics.medium();
-        setFeedback({ type: 'error', text: extractFrappeError(e) });
+        setFeedback({ tone: 'danger', text: extractFrappeError(e) });
       }
     } finally {
       resetBucket();
@@ -225,109 +214,106 @@ export default function IssuingScreen() {
   const scanEnabled = !!selectedOrder && items.length > 0 && !loading;
 
   return (
-    <SafeAreaView style={styles.root}>
-      <AppBar title="Issue From Coldstore" onBack={() => router.back()} />
+    <Screen title="Issue From Coldstore">
+      {/* Order type-ahead */}
+      <Card title="Select order">
+        <Field label="Sale Order">
+          <View>
+            <TextInput
+              style={styles.input}
+              value={orderQuery}
+              onChangeText={(text) => {
+                setOrderQuery(text);
+                setSelectedOrder(null);
+                setItems([]);
+                setShowSuggestions(true);
+                setFeedback(null);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => {
+                hideTimer.current = setTimeout(() => setShowSuggestions(false), 150);
+              }}
+              placeholder={ordersQuery.isLoading ? 'Loading orders…' : 'Search sale order…'}
+              placeholderTextColor={colors.muted}
+              editable={!ordersQuery.isLoading && orders.length > 0}
+            />
+            {showSuggestions && suggestions.length > 0 ? (
+              <View style={styles.suggestions}>
+                {suggestions.slice(0, 8).map((o) => (
+                  <Pressable
+                    key={o}
+                    onPress={() => void selectOrder(o)}
+                    style={({ pressed }) => [styles.suggestion, pressed && styles.suggestionPressed]}
+                  >
+                    <Text style={styles.suggestionText}>{o}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        </Field>
+      </Card>
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.form}>
-          {/* Order type-ahead */}
-          <Field label="Sale Order">
-            <View>
+      {ordersQuery.error ? (
+        <Notice tone="danger">
+          Failed to load orders. Pull the drawer closed and reopen to retry.
+        </Notice>
+      ) : null}
+
+      {/* Packing list */}
+      {itemsLoading ? (
+        <View style={styles.loadingRow}>
+          <ActivityIndicator size="small" color={ACCENT} />
+          <Text style={styles.hint}>Loading items…</Text>
+        </View>
+      ) : selectedOrder && items.length === 0 ? (
+        <Text style={styles.hint}>No packing items found for {selectedOrder}.</Text>
+      ) : items.length > 0 ? (
+        <Card title={`Items for ${selectedOrder}`}>
+          <View style={styles.list}>
+            {items.map((item, idx) => (
+              <PackingCard key={`${item.bucket}-${idx}`} item={item} />
+            ))}
+          </View>
+        </Card>
+      ) : null}
+
+      {/* Bucket scan — only after an order is selected */}
+      {selectedOrder ? (
+        <Card title="Scan bucket">
+          <Field label="Bucket ID">
+            <View style={styles.scanRow}>
               <TextInput
-                style={styles.input}
-                value={orderQuery}
-                onChangeText={(text) => {
-                  setOrderQuery(text);
-                  setSelectedOrder(null);
-                  setItems([]);
-                  setShowSuggestions(true);
-                  setFeedback(null);
-                }}
-                onFocus={() => setShowSuggestions(true)}
-                onBlur={() => {
-                  hideTimer.current = setTimeout(() => setShowSuggestions(false), 150);
-                }}
-                placeholder={ordersQuery.isLoading ? 'Loading orders…' : 'Search sale order…'}
+                ref={bucketRef}
+                style={[styles.input, styles.scanInput, !scanEnabled && styles.inputDisabled]}
+                value={bucketInput}
+                onChangeText={onChangeBucket}
+                autoCapitalize="characters"
+                placeholder={loading ? 'Issuing…' : scanEnabled ? 'Scan bucket QR code…' : 'No items to issue'}
                 placeholderTextColor={colors.muted}
-                editable={!ordersQuery.isLoading && orders.length > 0}
+                editable={scanEnabled}
               />
-              {showSuggestions && suggestions.length > 0 ? (
-                <View style={styles.suggestions}>
-                  {suggestions.slice(0, 8).map((o) => (
-                    <Pressable
-                      key={o}
-                      onPress={() => void selectOrder(o)}
-                      style={({ pressed }) => [styles.suggestion, pressed && styles.suggestionPressed]}
-                    >
-                      <Text style={styles.suggestionText}>{o}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
+              <Pressable
+                style={styles.qrBtn}
+                onPress={() => {
+                  if (scanEnabled) setScannerVisible(true);
+                }}
+              >
+                <QrCode size={22} color={scanEnabled ? ACCENT : colors.muted} />
+              </Pressable>
             </View>
           </Field>
+        </Card>
+      ) : null}
 
-          {ordersQuery.error ? (
-            <Pill variant="error">Failed to load orders. Pull the drawer closed and reopen to retry.</Pill>
-          ) : null}
-
-          {/* Packing list */}
-          {itemsLoading ? (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator size="small" color={ACCENT} />
-              <Text style={styles.hint}>Loading items…</Text>
-            </View>
-          ) : selectedOrder && items.length === 0 ? (
-            <Text style={styles.hint}>No packing items found for {selectedOrder}.</Text>
-          ) : items.length > 0 ? (
-            <View style={styles.list}>
-              <Text style={styles.listTitle}>Items for {selectedOrder}</Text>
-              {items.map((item, idx) => (
-                <PackingCard key={`${item.bucket}-${idx}`} item={item} />
-              ))}
-            </View>
-          ) : null}
-
-          {/* Bucket scan — only after an order is selected */}
-          {selectedOrder ? (
-            <Field label="Bucket ID">
-              <View style={styles.scanRow}>
-                <TextInput
-                  ref={bucketRef}
-                  style={[styles.input, styles.scanInput, !scanEnabled && styles.inputDisabled]}
-                  value={bucketInput}
-                  onChangeText={onChangeBucket}
-                  autoCapitalize="characters"
-                  placeholder={loading ? 'Issuing…' : scanEnabled ? 'Scan bucket QR code…' : 'No items to issue'}
-                  placeholderTextColor={colors.muted}
-                  editable={scanEnabled}
-                />
-                <Pressable
-                  style={styles.qrBtn}
-                  onPress={() => {
-                    if (scanEnabled) setScannerVisible(true);
-                  }}
-                >
-                  <QrCode size={22} color={scanEnabled ? ACCENT : colors.muted} />
-                </Pressable>
-              </View>
-            </Field>
-          ) : null}
-
-          {feedback ? <Pill variant={feedback.type}>{feedback.text}</Pill> : null}
-        </View>
-      </ScrollView>
+      {feedback ? <Notice tone={feedback.tone}>{feedback.text}</Notice> : null}
 
       <BarcodeScannerOverlay
         visible={scannerVisible}
         onScan={handleCameraScan}
         onCancel={() => setScannerVisible(false)}
       />
-    </SafeAreaView>
+    </Screen>
   );
 }
 
@@ -340,7 +326,7 @@ function PackingCard({ item }: { item: XfloraReadySaleOrderItem }) {
         </Text>
         {item.isIssued ? (
           <View style={styles.badge}>
-            <CheckCircle2 size={13} color={colors.success} />
+            <CircleCheck size={13} color={colors.success} />
             <Text style={styles.badgeText}>Issued</Text>
           </View>
         ) : null}
@@ -352,7 +338,7 @@ function PackingCard({ item }: { item: XfloraReadySaleOrderItem }) {
       <CardRow label="Stems to issue" value={item.qty} muted={item.isIssued} />
       {item.downgradeTo ? (
         <View style={styles.downgradeRow}>
-          <AlertTriangle size={14} color={colors.warning} />
+          <TriangleAlert size={14} color={colors.warning} />
           <Text style={styles.downgradeText}>Downgrade to: {item.downgradeTo}</Text>
         </View>
       ) : null}
@@ -372,10 +358,6 @@ function CardRow({ label, value, muted }: { label: string; value: string; muted:
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  scroll: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
-  form: { gap: spacing.md },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -425,10 +407,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
+    marginBottom: spacing.md,
   },
   hint: { fontSize: 13, color: colors.muted, textAlign: 'center' },
   list: { gap: spacing.sm },
-  listTitle: { fontSize: 15, fontWeight: '600', color: colors.primary },
   card: {
     borderWidth: 1,
     borderColor: 'rgba(105,157,205,0.3)',
