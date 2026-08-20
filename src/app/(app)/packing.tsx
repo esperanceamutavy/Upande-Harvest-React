@@ -12,7 +12,7 @@ import {
   usePackBunch,
 } from '../../features/packing/usePackBunch';
 import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOverlay';
-import { playSubmit, playError } from '../../lib/audio';
+import { playBeep, playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
 import { extractFrappeError } from '../../lib/api';
 import { extractScannedId } from '../../lib/qr';
@@ -286,10 +286,31 @@ export default function PackingScreen() {
       setBunchesInBox(plan.bunchesAfter);
       setBunchesPacked((prev) => prev + 1);
 
+      // ── Box-full announcement ────────────────────────────────────────────
+      // This scan CLOSED the box when it lands exactly on the cap. The counter
+      // card advances on its own; this is the announcement, not the mechanism.
+      // It stays on screen until the next scan clears it — a packer looking
+      // down at the flowers needs it still there when they look up.
+      const cap = s.targets.capBunches;
+      const boxClosed = plan.bunchesAfter >= cap;
+      const lastBox = plan.boxId >= s.targets.boxCount;
+
       playSubmit();
+      if (boxClosed) {
+        // Second cue on top of the usual submit sound, so a closed box is
+        // audibly distinct from an ordinary scan without being a new sound to
+        // learn. Paired with a heavy haptic; ordinary scans have none.
+        playBeep();
+        haptics.heavy();
+      }
+
       setFeedback({
         tone: 'success',
-        text: `Box ${plan.boxId} — ${plan.bunchesAfter} of ${s.targets.capBunches} bunches · ${bunch.itemCode} ${bunch.stemLength}`,
+        text: boxClosed
+          ? lastBox
+            ? `Box ${plan.boxId} of ${s.targets.boxCount} complete — order fully packed.`
+            : `Box ${plan.boxId} of ${s.targets.boxCount} complete — ${plan.bunchesAfter} of ${cap} bunches. Starting Box ${plan.boxId + 1}.`
+          : `Box ${plan.boxId} — ${plan.bunchesAfter} of ${cap} bunches · ${bunch.itemCode} ${bunch.stemLength}`,
       });
       logEntry({
         bunchId,
@@ -298,7 +319,7 @@ export default function PackingScreen() {
         rejection: null,
         detail: `${bunch.itemCode} ${bunch.stemLength} · ${bunch.bunchUom}${
           res.docname ? ` · ${res.docname}` : ''
-        }`,
+        }${boxClosed ? ` · closed Box ${plan.boxId}` : ''}`,
       });
       setBunchProgrammatic('');
       bunchRef.current?.focus();
@@ -489,7 +510,9 @@ export default function PackingScreen() {
       ) : null}
 
       <Text style={styles.hint}>
-        Boxes advance automatically when the pack rate is reached.
+        {bunchesPacked >= session.targets.targetBunches
+          ? 'Order fully packed. Change pick list to start another.'
+          : 'Boxes advance automatically when the pack rate is reached.'}
       </Text>
 
       <BarcodeScannerOverlay
