@@ -69,7 +69,7 @@ export default function Dashboard() {
 
         {isLoading ? (
           <View style={styles.stateBox}>
-            <ActivityIndicator size="large" color={colors.accent} />
+            <ActivityIndicator size="large" color={colors.text} />
           </View>
         ) : isError ? (
           <View style={styles.stateBox}>

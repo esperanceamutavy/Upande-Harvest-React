@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   inputError: { borderColor: colors.error },
-  clientBadge: { fontSize: 12, fontWeight: '500', color: colors.accent, textAlign: 'center' },
+  clientBadge: { fontSize: 12, fontWeight: '500', color: colors.textMuted, textAlign: 'center' },
   passwordRow: { flexDirection: 'row', alignItems: 'center' },
   passwordInput: { flex: 1 },
   eyeBtn: { padding: 4, marginLeft: spacing.sm },

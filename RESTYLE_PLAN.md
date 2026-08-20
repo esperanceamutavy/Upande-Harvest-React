@@ -127,19 +127,26 @@ Then backfill only what the screens actually need — resist porting all twelve.
 
 ## 7. Phase 5 — cleanup
 
-- **Fix the scan line.** `src/features/scanning/BarcodeScannerOverlay.tsx:111` uses `ACCENT` as the scan-line `backgroundColor`. With accent now `#171717`, that's a black line on a dark camera feed — invisible. Change to `#FFFFFF` (or `colors.success` if you want it to read as "armed"). **This is a functional regression if missed, not a cosmetic one.**
-- Rename the five `const ACCENT = colors.accent` declarations in `receiving` / `rejects` / `shelving` / `bucket-transfer` / `issuing` to reference `colors.text` (icons) or `colors.primary` (fills) per site.
-- `Pill.tsx:11` `info: colors.accent` → `colors.info`.
-- `login.tsx:179` `clientBadge` → `colors.textMuted`; a black badge under the logo reads as an error.
-- `index.tsx:72` `ActivityIndicator color={colors.accent}` → `colors.text`.
-- Delete `colors.accent` from `theme.ts`. `npx tsc --noEmit` is the proof.
+All done except the harness removal at the bottom. Two corrections to what this section originally said:
+
+- ~~**Fix the scan line.**~~ **The original bullet was wrong on three counts.** `BarcodeScannerOverlay.tsx` has **no scan line** — no reticle, no animated bar, just a full-bleed `CameraView` and a close button. Line 111 is `settingsBtn`, the "Open Settings" button on the permission-denied screen. And its `ACCENT` was `const ACCENT = '#699dcd'` — a **hardcoded literal, not `colors.accent`** — so Phase 1's alias never touched it and there was no invisible-black-line regression to fix.
+
+  **The underlying worry was real, just mislocated.** `settingsBtn` sits on a `#000` background, so resolving it to the monochrome primary `#171717` would have made it near-invisible — the exact failure the bullet described, on a different element. Resolved by inverting instead: `#FFFFFF` fill with `#171717` text.
+- **The `rgba(105,157,205,·)` hairlines were an unlisted site.** Five `qrBtn` borders (`receiving`, `rejects`, `shelving`, `bucket-transfer`, `issuing`) and issuing's packing-card border hardcoded the steel-blue at 0.3–0.4 alpha rather than going through `colors.accent`. **`tsc` cannot catch these** — deleting the token proves nothing about a string literal. All now `colors.border`. Grep for the literal, don't trust the compiler.
+- Renamed every `const ACCENT = colors.accent` across `receiving` / `rejects` / `shelving` / `bucket-transfer` / `issuing`, resolving per site: `colors.text` for icons and spinners, `colors.primary` for fills (checkbox, chip), `colors.border` for hairlines. The `const ACCENT` declarations are gone rather than repointed.
+- `Pill.tsx` `info: colors.accent` → `colors.info`.
+- `login.tsx` `clientBadge` → `colors.textMuted`.
+- `index.tsx` `ActivityIndicator color={colors.accent}` → `colors.text`.
+- Deleted `colors.accent` from `theme.ts`; `npx tsc --noEmit` clean. No `colors.accent`, `ACCENT`, or `105,157,205` reference survives anywhere in `src/`.
 - ~~Delete `AppBar.tsx`.~~ **Not in this phase.** `rejects.tsx` is out of Phase 3 and still renders `AppBar`, so the component keeps a live consumer. See §5.
-- **Remove the Phase 2 `ui-preview` harness — all three pieces:**
+- **Remove the Phase 2 `ui-preview` harness — all three pieces. ⚠️ DELIBERATELY NOT DONE YET.**
   1. the route file `src/app/(app)/ui-preview.tsx`
   2. its `<Tabs.Screen name="ui-preview" options={{ href: null }} />` entry in `src/app/(app)/_layout.tsx`
   3. the `{ label: 'UI Preview', icon: LayoutGrid, route: '/ui-preview' }` row in `WORKFLOW_ITEMS` in `src/features/navigation/drawerItems.ts`
 
   Missing (2) leaves a `Tabs.Screen` pointing at a route that no longer exists; missing (3) leaves a dead drawer row that throws on tap. Deleting only the file is not enough.
+
+  **Held back on purpose:** the harness is the only place `Button`'s six variants and `Segmented` can be checked in isolation, and Phases 3–5 have not been verified on a device yet. Deleting it now would remove the instrument before the measurement. **This is the last outstanding Phase 5 item — do it once the device pass is signed off, before the Phase 7 `eas update`.**
 
 ## 8. Phase 6 — Grading and Packing
 

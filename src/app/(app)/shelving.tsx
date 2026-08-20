@@ -15,7 +15,6 @@ import { Field } from '../../components/ui/Field';
 import { Screen } from '../../components/ui/Screen';
 import { colors, radii, spacing } from '../../components/ui/theme';
 
-const ACCENT = colors.accent;
 const DEBOUNCE_MS = 500;
 
 type FeedbackMsg = { tone: NoticeTone; text: string };
@@ -222,7 +221,7 @@ export default function ShelvingScreen() {
                 editable={!loading}
               />
               <Pressable style={styles.qrBtn} onPress={() => openScanner('shelf')}>
-                <QrCode size={22} color={ACCENT} />
+                <QrCode size={22} color={colors.text} />
               </Pressable>
             </View>
           </Field>
@@ -240,7 +239,7 @@ export default function ShelvingScreen() {
                 editable={!loading}
               />
               <Pressable style={styles.qrBtn} onPress={() => openScanner('bucket')}>
-                <QrCode size={22} color={ACCENT} />
+                <QrCode size={22} color={colors.text} />
               </Pressable>
             </View>
           </Field>
@@ -249,7 +248,7 @@ export default function ShelvingScreen() {
 
       {loading ? (
         <View style={styles.loadingRow}>
-          <ActivityIndicator size="small" color={ACCENT} />
+          <ActivityIndicator size="small" color={colors.text} />
           <Text style={styles.hint}>Shelving…</Text>
         </View>
       ) : null}
@@ -293,7 +292,7 @@ const styles = StyleSheet.create({
   qrBtn: {
     padding: 10,
     borderWidth: 1,
-    borderColor: 'rgba(105,157,205,0.4)',
+    borderColor: colors.border,
     borderRadius: radii.md,
     backgroundColor: colors.surface,
   },
@@ -312,5 +311,5 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   stationText: { fontSize: 13, color: colors.primary, flex: 1 },
-  changeLink: { fontSize: 13, color: ACCENT, fontWeight: '600' },
+  changeLink: { fontSize: 13, color: colors.text, fontWeight: '600' },
 });

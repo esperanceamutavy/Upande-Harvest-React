@@ -13,8 +13,6 @@ import { Screen } from '../../components/ui/Screen';
 import { Segmented } from '../../components/ui/Segmented';
 import { colors, radii, spacing } from '../../components/ui/theme';
 
-const ACCENT = colors.accent;
-
 // Port of xflora_receiving_entry.dart:37
 const BUNCH_SIZES = [5, 7, 9, 10, 13] as const;
 
@@ -310,7 +308,7 @@ export default function ReceivingScreen() {
                 if (!loading) setScannerVisible(true);
               }}
             >
-              <QrCode size={22} color={ACCENT} />
+              <QrCode size={22} color={colors.text} />
             </Pressable>
           </View>
         </Field>
@@ -346,7 +344,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkboxChecked: { backgroundColor: ACCENT, borderColor: ACCENT },
+  checkboxChecked: { backgroundColor: colors.primary, borderColor: colors.primary },
   toggleLabels: { flex: 1, gap: 2 },
   toggleLabel: { fontSize: 14, fontWeight: '600', color: colors.primary },
   toggleHint: { fontSize: 12, color: colors.muted },
@@ -361,7 +359,7 @@ const styles = StyleSheet.create({
     minWidth: 44,
     alignItems: 'center',
   },
-  chipSelected: { backgroundColor: ACCENT, borderColor: ACCENT },
+  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { fontSize: 14, fontWeight: '700', color: colors.primary },
   chipTextSelected: { color: 'white' },
   input: {
@@ -379,7 +377,7 @@ const styles = StyleSheet.create({
   qrBtn: {
     padding: 10,
     borderWidth: 1,
-    borderColor: 'rgba(105,157,205,0.4)',
+    borderColor: colors.border,
     borderRadius: radii.md,
     backgroundColor: colors.surface,
   },

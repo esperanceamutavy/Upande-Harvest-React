@@ -6,7 +6,6 @@ import { X } from 'lucide-react-native';
 
 import { playBeep } from '../../lib/audio';
 
-const ACCENT = '#699dcd';
 
 export interface BarcodeScannerOverlayProps {
   visible: boolean;
@@ -107,15 +106,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 32,
   },
+  // White fill on the pure-black permission screen. The retired steel-blue
+  // lived here; the monochrome primary (#171717) would be near-invisible
+  // against #000, so this inverts rather than following colors.primary.
   settingsBtn: {
-    backgroundColor: ACCENT,
+    backgroundColor: '#FFFFFF',
     borderRadius: 8,
     paddingVertical: 12,
     paddingHorizontal: 32,
     marginBottom: 12,
   },
   settingsBtnText: {
-    color: '#fff',
+    color: '#171717',
     fontSize: 15,
     fontWeight: '600',
   },

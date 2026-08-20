@@ -15,8 +15,6 @@ import { Screen } from '../../components/ui/Screen';
 import { colors, radii, spacing } from '../../components/ui/theme';
 import type { XfloraReadySaleOrderItem } from '../../types/xflora';
 
-const ACCENT = colors.accent;
-
 type FeedbackMsg = { tone: NoticeTone; text: string };
 
 function isValidJson(text: string): boolean {
@@ -263,7 +261,7 @@ export default function IssuingScreen() {
       {/* Packing list */}
       {itemsLoading ? (
         <View style={styles.loadingRow}>
-          <ActivityIndicator size="small" color={ACCENT} />
+          <ActivityIndicator size="small" color={colors.text} />
           <Text style={styles.hint}>Loading items…</Text>
         </View>
       ) : selectedOrder && items.length === 0 ? (
@@ -299,7 +297,7 @@ export default function IssuingScreen() {
                   if (scanEnabled) setScannerVisible(true);
                 }}
               >
-                <QrCode size={22} color={scanEnabled ? ACCENT : colors.muted} />
+                <QrCode size={22} color={scanEnabled ? colors.text : colors.muted} />
               </Pressable>
             </View>
           </Field>
@@ -374,7 +372,7 @@ const styles = StyleSheet.create({
   qrBtn: {
     padding: 10,
     borderWidth: 1,
-    borderColor: 'rgba(105,157,205,0.4)',
+    borderColor: colors.border,
     borderRadius: radii.md,
     backgroundColor: colors.surface,
   },
@@ -413,7 +411,7 @@ const styles = StyleSheet.create({
   list: { gap: spacing.sm },
   card: {
     borderWidth: 1,
-    borderColor: 'rgba(105,157,205,0.3)',
+    borderColor: colors.border,
     borderRadius: radii.md,
     backgroundColor: colors.surface,
     padding: spacing.md,

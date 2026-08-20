@@ -23,7 +23,6 @@ import { Pill } from '../../components/ui/Pill';
 import { colors, radii, spacing } from '../../components/ui/theme';
 import type { XfloraDiscardPayload } from '../../types/xflora';
 
-const ACCENT = colors.accent;
 const AUTO_DISMISS_MS = 2500;
 
 type FeedbackMsg = { type: 'success' | 'warning' | 'error'; text: string };
@@ -177,7 +176,7 @@ export default function RejectsScreen() {
                   if (!loading) setScannerVisible(true);
                 }}
               >
-                <QrCode size={22} color={ACCENT} />
+                <QrCode size={22} color={colors.text} />
               </Pressable>
             </View>
           </Field>
@@ -261,7 +260,7 @@ const styles = StyleSheet.create({
   qrBtn: {
     padding: 10,
     borderWidth: 1,
-    borderColor: 'rgba(105,157,205,0.4)',
+    borderColor: colors.border,
     borderRadius: radii.md,
     backgroundColor: colors.surface,
   },

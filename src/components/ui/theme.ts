@@ -3,10 +3,11 @@
 // as one product in the field.
 //
 // CHANGES FROM THE PREVIOUS VERSION:
-//   1. Xflora's steel-blue accent (#699dcd) is RETIRED. `colors.accent` now
-//      aliases the neutral primary so the ~14 existing call sites go monochrome
-//      with zero screen edits. It is deprecated — see RESTYLE_PLAN.md Phase 5
-//      for the rename-and-delete pass.
+//   1. Xflora's steel-blue accent (#699dcd) is RETIRED and `colors.accent` is
+//      gone. Phase 1 shipped it as a deprecated alias of the neutral primary so
+//      the call sites went monochrome with zero screen edits; Phase 5 renamed
+//      every site to `text` (icons), `primary` (fills) or `border` (hairlines)
+//      and deleted the key.
 //   2. `colors.bg` is #F5F5F5 (was #FAFAFA) to match packhouse's screen ground.
 //   3. `typography.title` is now near-black (was #fff). The app bar flips from a
 //      dark bar to a white surface with a hairline border — see Phase 2.
@@ -39,15 +40,6 @@ export const colors = {
   // informational colour are the same near-black.
   primary: '#171717',
   info: '#171717',
-
-  /**
-   * @deprecated Xflora's steel-blue (#699dcd) has been retired in favour of the
-   * packhouse monochrome system. Kept as an alias so existing screens compile
-   * and render correctly during the restyle. Do not use in new code — use
-   * `primary` for actions, `text` for icons, `success` for affirmative accents.
-   * Removed in Phase 5.
-   */
-  accent: '#171717',
 
   // ---- Surfaces -----------------------------------------------------------
   /** Screen ground. Packhouse calls this `bgMuted`. */

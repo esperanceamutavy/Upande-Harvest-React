@@ -12,8 +12,6 @@ import { Field } from '../../components/ui/Field';
 import { Screen } from '../../components/ui/Screen';
 import { colors, radii, spacing } from '../../components/ui/theme';
 
-const ACCENT = colors.accent;
-
 type FeedbackMsg = { tone: NoticeTone; text: string };
 type ScanTarget = 'source' | 'destination';
 
@@ -178,7 +176,7 @@ export default function BucketTransferScreen() {
                 editable={!loading}
               />
               <Pressable style={styles.qrBtn} onPress={() => openScanner('source')}>
-                <QrCode size={22} color={ACCENT} />
+                <QrCode size={22} color={colors.text} />
               </Pressable>
             </View>
           </Field>
@@ -200,7 +198,7 @@ export default function BucketTransferScreen() {
                 editable={!loading}
               />
               <Pressable style={styles.qrBtn} onPress={() => openScanner('destination')}>
-                <QrCode size={22} color={ACCENT} />
+                <QrCode size={22} color={colors.text} />
               </Pressable>
             </View>
           </Field>
@@ -209,7 +207,7 @@ export default function BucketTransferScreen() {
 
       {loading ? (
         <View style={styles.loadingRow}>
-          <ActivityIndicator size="small" color={ACCENT} />
+          <ActivityIndicator size="small" color={colors.text} />
           <Text style={styles.hint}>Transferring…</Text>
         </View>
       ) : null}
@@ -246,7 +244,7 @@ const styles = StyleSheet.create({
   qrBtn: {
     padding: 10,
     borderWidth: 1,
-    borderColor: 'rgba(105,157,205,0.4)',
+    borderColor: colors.border,
     borderRadius: radii.md,
     backgroundColor: colors.surface,
   },

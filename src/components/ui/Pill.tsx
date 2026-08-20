@@ -8,7 +8,7 @@ const VARIANT_COLORS: Record<Variant, string> = {
   success: colors.success,
   warning: colors.warning,
   error: colors.error,
-  info: colors.accent,
+  info: colors.info,
   neutral: colors.primary,
 };
 
