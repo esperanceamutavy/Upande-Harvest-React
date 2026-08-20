@@ -81,27 +81,28 @@ Port `Card` and `Alert` as-is; `Card`'s title uses the new `typography.eyebrow`.
 
 **Verify:** `Screen` renders standalone on a throwaway route before any migration.
 
-## 5. Phase 3 — migrate the six screens
+## 5. Phase 3 — migrate the five screens
 
 Order matters: establish the pattern on the smallest file, verify on a device, then repeat.
 
 1. `configure.tsx` (110 lines) — the pattern-setter
-2. `rejects.tsx` (303)
-3. `bucket-transfer.tsx` (283)
-4. `shelving.tsx` (333)
-5. `receiving.tsx` (436)
-6. `issuing.tsx` (464)
+2. `bucket-transfer.tsx` (283)
+3. `shelving.tsx` (333)
+4. `receiving.tsx` (436)
+5. `issuing.tsx` (464)
 
-For each: replace `<SafeAreaView>` + `<AppBar>` + hand-rolled `<ScrollView>` with `<Screen title="…">`, then group each logical form section in a `<Card title="…">`. Replace ad-hoc inline warning/error blocks with `<Alert tone>`. Delete the now-dead local `styles` entries as you go — don't leave orphans.
+**`rejects.tsx` (303) is out of Phase 3.** It is not migrated and keeps `AppBar`. It still needs the Phase 5 accent rename — that is a token cleanup, independent of the `Screen` migration.
+
+For each: replace `<SafeAreaView>` + `<AppBar>` + hand-rolled `<ScrollView>` with `<Screen title="…">`, then group each logical form section in a `<Card title="…">`. Replace ad-hoc inline warning/error blocks with `<Notice tone>` (exported from `Card.tsx`; named `Notice` rather than the reference's `Alert` to avoid colliding with react-native's `Alert.alert`). Delete the now-dead local `styles` entries as you go — don't leave orphans.
 
 Two notes:
 
 - Packhouse's `Screen` has **no back affordance** — navigation is drawer + tabs, and the header is hamburger-only. **We diverge deliberately here:** the reference has no back prop because it has no pushed routes, and we do. `Screen` takes an optional `onBack` that swaps the hamburger for a lucide `ChevronLeft` in the same leading slot; when it is set the drawer is not mounted, since there would be no way to open it.
 
-  `onBack` goes on exactly the four routes registered `href: null` in `(app)/_layout.tsx` — `rejects`, `configure`, `erp-desk`, `stock-entry/[id]`. The five tab destinations (`index`, `receiving`, `bucket-transfer`, `shelving`, `issuing`) stay hamburger-only. Applied to `configure`, `erp-desk`, and `stock-entry/[id]`; `rejects` picks it up when it migrates as Phase 3 step 2.
+  `onBack` goes on exactly three routes — `configure`, `erp-desk`, `stock-entry/[id]` — and all three already have it. Every screen remaining in Phase 3 (`bucket-transfer`, `shelving`, `receiving`, `issuing`) is a tab destination, so **`onBack` applies to none of them**; they are hamburger-only, like `index`. `rejects` is also registered `href: null` but is out of Phase 3 and keeps `AppBar`, so it never takes `onBack`.
 
   Note that `erp-desk` and `stock-entry/[id]` were bare "coming in Phase 6" stubs with no header of any kind, so they were wrapped in `<Screen scroll={false}>` rather than converted.
-- Once all six are migrated, `AppBar.tsx` has no consumers. Delete it in Phase 5, not before.
+- **`AppBar.tsx` survives Phase 5.** `rejects.tsx` is its one remaining consumer once the five screens are migrated, so it cannot be deleted. It goes only when `rejects` is eventually migrated or retired.
 
 **Verify:** each screen on a physical device against production before moving to the next. These are live coldroom flows.
 
@@ -109,7 +110,7 @@ Two notes:
 
 Upgrade `src/components/ui/Button.tsx` to the packhouse contract: `borderRadius.full`, `minHeight: 48`, Poppins **bold** label, `variant: 'primary' | 'outline' | 'ghost'`, `iconLeft`, `loading` rendering an inline `ActivityIndicator`, disabled at `opacity: 0.45` and pressed at `0.85`.
 
-The current API takes `children`; packhouse takes `label`. Support both during migration (`label?: string; children?: ReactNode`) so the six screens don't all have to change in the same commit.
+The current API takes `children`; packhouse takes `label`. Support both during migration (`label?: string; children?: ReactNode`) so the migrated screens don't all have to change in the same commit.
 
 Then backfill only what the screens actually need — resist porting all twelve. `Segmented` (Receiving's single/batch/bunched mode switch is hand-rolled today), `ProgressBar`, `Toast`, and `OfflineBanner` are the ones that pay for themselves. `Dropdown` overlaps our existing `Picker` — compare before porting, don't end up with both.
 
@@ -121,7 +122,7 @@ Then backfill only what the screens actually need — resist porting all twelve.
 - `login.tsx:179` `clientBadge` → `colors.textMuted`; a black badge under the logo reads as an error.
 - `index.tsx:72` `ActivityIndicator color={colors.accent}` → `colors.text`.
 - Delete `colors.accent` from `theme.ts`. `npx tsc --noEmit` is the proof.
-- Delete `AppBar.tsx`.
+- ~~Delete `AppBar.tsx`.~~ **Not in this phase.** `rejects.tsx` is out of Phase 3 and still renders `AppBar`, so the component keeps a live consumer. See §5.
 - **Remove the Phase 2 `ui-preview` harness — all three pieces:**
   1. the route file `src/app/(app)/ui-preview.tsx`
   2. its `<Tabs.Screen name="ui-preview" options={{ href: null }} />` entry in `src/app/(app)/_layout.tsx`
