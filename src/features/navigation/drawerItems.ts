@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  Box,
   Hexagon,
   LayoutGrid,
   PackageCheck,
@@ -32,10 +33,9 @@ export const WORKFLOW_ITEMS: DrawerItem[] = [
   { label: 'Shelving', icon: LayoutGrid, route: '/shelving' },
   { label: 'Issuing', icon: PackageCheck, route: '/issuing' },
   { label: 'Grading', icon: Hexagon, route: '/grading' },
+  { label: 'Packing', icon: Box, route: '/packing' },
   //
   // Still to come (RESTYLE_PLAN.md §8):
-  //   Packing → Box   → '/packing'  — blocked on the three add_bunch_to_box
-  //                                   questions in §8.3
   //   Staging → Boxes → '/staging'
 ];
 

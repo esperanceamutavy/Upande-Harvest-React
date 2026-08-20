@@ -150,7 +150,7 @@ Two corrections to what this section originally said:
 
 ## 8. Phase 6 — Grading and Packing
 
-**Backend status on `xflora.upande.com`:** **Grading is built** (§8.2). **Packing's contract is confirmed and its write path is fixed as of 2026-08-20** — the summary-field corruption is resolved. One blocker remains before it can ship: the `item_code`/`uom` convention mismatch that silently mis-warehouses scans and gates Rule 3 (§8.3). Dispatch is unscoped rather than blocked (§8.4).
+**Backend status on `xflora.upande.com`:** **Grading is built and verified** (§8.2). **Packing has no backend blockers** — the summary-field corruption, the `item_code` variant/template mismatch and the `uom` match dimension were all fixed live on 2026-08-20, and the screen is built (§8.3). Dispatch is unscoped rather than blocked (§8.4).
 
 ### 8.0 Source split — read this first
 
@@ -339,7 +339,7 @@ There is also a **self-heal path** in the script for bunch numbers `20099–2082
 - **QR routing is type-aware.** `detectGradingQrType` ports the legacy JSON-key and string-prefix detection, so a badge scanned into the bunch field re-latches the grader instead of being submitted as a bunch. Bucket-type QRs are rejected with the Direct-to-Grader message, as in the reference.
 - **Writes are serialized** through `serializeByKey('grading', …)` — §8.1. Lives in `lib/serializeByKey.ts`, not `lib/api.ts` (constraint 3).
 
-### 8.3 Packing — contract confirmed; write path fixed; one blocker left
+### 8.3 Packing — ✅ NO BACKEND BLOCKERS. Screen built 2026-08-20.
 
 **Everything this section previously said about packing was wrong.** It was derived from `/tmp/xflora-legacy`, which points at a different site (§8.0).
 
@@ -642,18 +642,23 @@ Note this makes Rule 3 a **membership test against the OPL's rows**, not a compa
 
 This ranks with Rule 2, not with Rule 1. Rule 1 prevents an overfull box, which is visible and recoverable. Rule 3 prevents silent stock misallocation, which is neither.
 
-#### 🔴 Rule 3 CANNOT be a strict string match yet — the mismatch is CONFIRMED FIRING on live data
+#### ✅ RESOLVED (2026-08-20) — the mismatch was a VARIANT relation, not a naming inconsistency
 
-**`OPL-2026-02906` holds `item_code` `"Athena"` while its Box Label row reads `"Athena-35CM"`, and its `uom` is `"Stems"`, not `"Bunch(10)"`.** Two of the server's three match dimensions fail, so **every scan on that OPL fell back to `item_locations[0].warehouse` silently.** This is no longer a hypothesis about a convention inconsistency — it has already happened, in production, undetected.
+The `item_code` disagreement was never a convention error. **`"Athena"` is an Item template (`variant_of` null); `"Athena-35CM"` is its variant.** `Bunch QR Code` stores the **variant**; OPL `item_locations` stores the **template**, with the length in `custom_stem_length`. Both were correct all along — the match was comparing across two levels of the same hierarchy.
 
-Implemented as strict equality, Rule 3 would **reject every scan** on such an OPL: the bunch's `item_code` (`Athena-35CM`, matching the Box Label form) never equals the OPL's (`Athena`). That converts a silent-corruption bug into a total block, which is safer but unusable.
+Two script edits applied live:
 
-So Rule 3 is correct in intent and **not yet implementable as specified.** One of these has to happen first, and it is a data/backend decision, not a client one:
+1. **Variant-aware match.** The script now resolves the relation instead of comparing strings:
+   ```python
+   variant_parent = frappe.db.get_value("Item", item_code, "variant_of") or item_code
+   if location.item_code in (item_code, variant_parent) and ...
+   ```
+   No string parsing, so it survives variants that do not follow a `Name-NNCM` convention.
+2. **The `uom` dimension is DROPPED from the warehouse match.** An OPL row's `uom` may be `"Stems"` while the bunch is `"Bunch(10)"`, which broke every `Stems`-uom OPL. `item_code` + `custom_stem_length` identifies a row uniquely, so the third dimension was redundant as well as harmful.
 
-1. **Reconcile the `item_code` convention** so OPL rows and `Bunch QR Code` rows agree. Cleanest, and it fixes the warehouse resolution for everyone, not just this client.
-2. **Define the relationship explicitly** — e.g. OPL `item_code` is the variety stem and the bunch's is `<variety>-<length>` — and have the client match on the documented derivation rather than equality. Fragile: it re-introduces exactly the "parse a length out of `item_code`" pattern this plan already warns against.
+**Rule 3 is therefore implementable client-side, and is implemented**, using the same relation: compare the bunch's `stem_length` against the OPL's lengths, and its `item_code` against the OPL's templates via `variant_of`. The client mirrors the server's rule exactly, so a client-side pass predicts a server-side match.
 
-Until one lands, **the client cannot distinguish "wrong variety" from "convention mismatch"**, and any rejection it raises may be a false positive. Do not ship Rule 3 as a hard block against live OPLs before this is settled — and note that not shipping it leaves the silent-misallocation path open, which is why this belongs on the same gate as the summary-field corruption above.
+*(This supersedes an entry that said Rule 3 "cannot be a strict string match yet" and proposed either reconciling the convention or parsing a length out of `item_code`. Neither was needed — the relation was already modelled in ERPNext, just not consulted.)*
 
 #### ✅ RESOLVED — a `Stems`-uom OPL does NOT break the paren parse
 
@@ -828,11 +833,11 @@ Rule 3 is already correct for this case: it is expressed as a membership test ov
 
 - **Check against a LIVE OPL, not a snapshot one.** OPL ids in this plan are illustrative (§8.0) — the snapshot tops out at `OPL-2026-00900` while live is past `OPL-2026-02904`. Anything below only means something when re-read from the live site.
 - ~~**BLOCKING — summary-field corruption.**~~ **✅ FIXED 2026-08-20.** Three defects corrected live; writes are no longer corrupt. The retained analysis is now the post-fix verification shape. 16 pre-fix FPLs still carry wrong summaries — backfill is a separate decision.
-- **🔴 BLOCKING — the `item_code` / `uom` convention mismatch is firing in production.** `OPL-2026-02906` (`item_code` `Athena` vs bunch `Athena-35CM`, uom `Stems`) fails two of three match dimensions on every scan and silently takes the fallback warehouse. Rule 3 cannot ship as a strict match until OPL and `Bunch QR Code` conventions are reconciled — and not shipping it leaves the silent-misallocation path open. See the Rule 3 blocker.
+- ~~**BLOCKING — the `item_code` / `uom` convention mismatch.**~~ **✅ FIXED 2026-08-20.** It was a variant/template relation, not a naming error. The script is now variant-aware via `Item.variant_of` and the `uom` dimension is dropped from the warehouse match. Rule 3 is implemented client-side on the same relation.
 - **⛔ OPEN — box closure has no trigger.** Nothing signals that a box is complete, so there is no event on which to render the Box Label PDF. Backend affordance required; see the Box Label section. Gates the printable deliverable specifically.
 - ~~**OPEN — what gets scanned into a `Stems`-uom OPL?**~~ **RESOLVED** — the paren parse reads the *payload's* `bunch_uom` (always `Bunch(N)` from the bunch record), not the OPL's, so such an OPL packs without throwing. It simply never matches a warehouse. Folded into the Rule 3 blocker above.
-- **The OPL picker has exclusion criteria to settle before it is built:** `custom_is_mixed_box_pick_list = 1` OPLs (deferred by choice), and — until the convention mismatch is fixed — OPLs whose `item_code`/`uom` cannot match their bunches, which will silently mis-warehouse everything scanned into them. Decide exclude-vs-mark for each.
-- **The silent warehouse fallback is Rule 3, not a watch item.** Promoted — see Rule 3. The `uom` half is **only partially** resolved: two sampled OPLs use `Bunch(N)`, but `OPL-2026-02906` uses `Stems`, so format agreement is a property of some OPLs rather than of the field.
+- **The OPL picker excludes mixed-box OPLs at the query** (`custom_is_mixed_box_pick_list = 0`), since mix is deferred and offering one would strand a packer mid-box. No other exclusion is needed now the variant match is fixed.
+- **The silent warehouse fallback is Rule 3, and Rule 3 now mirrors the fixed server rule.** The `uom` dimension no longer participates in the match at all, so `Stems`-uom OPLs resolve their warehouse correctly — the format inconsistency between OPLs is now irrelevant rather than merely unresolved.
 - **The doctype is spelled `Order Pick LIst`** — capital `I`. That typo is the actual doctype name; any direct query must reproduce it.
 - The OPL must have `item_locations`, or the call throws `Order Pick List has no location entries defined`.
 - The Farm Pack List is `submit()`ed on creation and thereafter updated with `ignore_validate_update_after_submit`, with `status` forced to `Completed` on every write. Expect no draft state.
@@ -875,9 +880,13 @@ Phases 1–5 are self-contained and shippable on their own. Ship the restyle fir
 
 *(Two earlier versions of this note were wrong in opposite directions: the first said the Box Label backlog "does not block packing writes" when the writes were themselves corrupt; the second said packing was blocked on that corruption, which is now fixed. Current position below.)*
 
-**One blocker remains before packing can ship:** the **`item_code` / `uom` convention mismatch, firing in production.** `OPL-2026-02906` fails two of three warehouse-match dimensions and silently mis-warehouses every scan. Rule 3 cannot be enabled as a strict match until OPL and `Bunch QR Code` conventions are reconciled — and leaving it off keeps the silent path open. Backend/data work, **not client work.**
+**No backend blockers remain.** The `item_code` mismatch was a variant/template relation, resolved live on 2026-08-20 by making the script variant-aware and dropping the redundant `uom` dimension from the warehouse match. Rule 3 is implemented client-side against the same relation.
 
-**Still open, lower severity:** the OPL picker's exclusion criteria (mixed-box OPLs, and any OPL whose convention mismatch cannot be reconciled), and the Box Label output workstream — six unset fields, a header `length` that cannot describe a real box, a **missing day code KEPHIS requires**, and **no closure trigger to render the PDF on**. The day-code omission in particular is recorded so that shipping without it is a decision rather than a surprise at inspection.
+**Still open, neither blocking the screen:** the Box Label **closure trigger** (nothing signals a box complete, so there is no event to render the PDF on) and **Box Label field population** (six fields the print format renders but `sync_box_label` never sets, plus the missing KEPHIS day code). Both are backend workstreams; packing writes and scans correctly without them.
+
+**Still open, lower severity, neither blocking the screen:** the Box Label output workstream — six unset fields, a header `length` that cannot describe a real box, a **missing day code KEPHIS requires**, and **no closure trigger to render the PDF on**. All backend. The day-code omission in particular is recorded so that shipping without it is a decision rather than a surprise at inspection.
+
+**Packing screen built 2026-08-20** (`src/app/(app)/packing.tsx`, drawer-only): OPL picker with a `Segmented` date window excluding mixed-box lists, a review card before any scanning, a persistent `Box N of M — n/cap stems` counter, and one request per bunch under `serializeByKey('packing')`. Needs a device check.
 
 **Confidence is split, and the split matters** (§8.0): endpoint *existence* is confirmed live, but every script *body* comes from a bench snapshot ~27 July 2026. Three snapshot-sourced behaviours carry the correctness rules and are tagged 🟡 at their use sites. They cost three deliberate scans to confirm — a successful pack, an ungraded bunch, a wrong-variety bunch — and that should happen on the first live packing session rather than after it.
 
