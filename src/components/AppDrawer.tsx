@@ -2,15 +2,14 @@ import { useEffect, useState } from 'react';
 import {
   Alert,
   Animated,
-  BackHandler,
   Dimensions,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LogOut, X } from 'lucide-react-native';
 
@@ -27,18 +26,21 @@ interface AppDrawerProps {
   onClose: () => void;
 }
 
-// Rendered ONCE, by the (app) layout — see drawerContext. Not a Modal: on
-// Android a Modal is a native window, and constructing/showing one per open was
-// a large part of the observed delay. An absolutely-positioned overlay rendered
-// as a LATER SIBLING of <Tabs> paints above the tab bar with no native window
-// involved, and the panel animation was already hand-rolled (the Modal used
-// animationType="none"), so nothing is lost visually.
+// Rendered ONCE, by the (app) layout — see drawerContext.
 //
-// The trade is Modal's `onRequestClose`, which handled the Android hardware
-// back button. BackHandler below restores that explicitly.
+// MODAL IS REQUIRED, not incidental. An in-tree absolutely-positioned overlay
+// was tried and REVERTED: it lost z-order to react-native-screens' native
+// screen containers, so the drawer opened but was painted behind the screen on
+// every route. Sibling order and zIndex/elevation do not beat a native view.
+// Modal's native window is the only thing that reliably sits above them.
+//
+// `statusBarTranslucent` also makes the dim layer cover the status bar, which
+// the in-tree overlay could not guarantee under edge-to-edge.
+//
+// The slide animation stays hand-rolled (`animationType="none"`), so `visible`
+// is driven by `mounted` rather than `isOpen` — see below.
 export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const fullName = useAuthStore((s) => s.fullName);
   const email = useAuthStore((s) => s.email);
   const farm = useFarm();
@@ -78,17 +80,6 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
     }
   }, [isOpen, translateX]);
 
-  // Android hardware back closes the drawer instead of leaving the screen.
-  // Replaces the `onRequestClose` the Modal used to provide.
-  useEffect(() => {
-    if (!isOpen) return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      onClose();
-      return true; // consumed — do not also pop the route
-    });
-    return () => sub.remove();
-  }, [isOpen, onClose]);
-
   function navigate(route: string) {
     onClose();
     router.push(route as never);
@@ -121,24 +112,32 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
 
   const initial = fullName && fullName.length > 0 ? fullName[0].toUpperCase() : 'U';
 
-  // Render nothing when closed. This started as a workaround for one Modal host
-  // per screen; with a single hoisted instance that reason is gone, but it is
-  // now REQUIRED for a different one: an absolute-fill overlay left mounted
-  // would swallow every touch on the screen beneath it.
-  if (!mounted) return null;
-
+  // `visible` is driven by `mounted`, NOT `isOpen`, so the Modal stays up for
+  // the 200ms slide-out before hiding. Binding it to `isOpen` would unmount
+  // instantly and the close animation would never be seen.
+  //
+  // On the mount gate: it cannot keep the subtree alive between opens, because
+  // RN's Modal returns null from its own render when hidden — the children
+  // unmount either way. So the gate now earns its place purely by preserving
+  // the exit animation. The explicit `if (!mounted) return null` is gone as
+  // redundant; `visible` does that job with one mechanism instead of two.
   return (
-    <View style={styles.host} pointerEvents="box-none">
+    <Modal
+      visible={mounted}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
       {/* Dim overlay — tap to close */}
       <Pressable style={styles.overlay} onPress={onClose} />
 
       {/* Drawer panel */}
       <Animated.View style={[styles.panel, { transform: [{ translateX }] }]}>
-        {/* Header. paddingTop comes from the live inset rather than a constant:
-            without a Modal there is no `statusBarTranslucent` guarantee, so how
-            far the overlay extends under the status bar depends on the platform's
-            edge-to-edge setting. Using the inset is correct either way. */}
-        <View style={[styles.header, { paddingTop: Math.max(insets.top + spacing.md, 24) }]}>
+        {/* Header. Back to a constant top pad: `statusBarTranslucent` puts the
+            Modal under the status bar predictably, so the inset-derived value
+            the in-tree overlay needed is no longer required. */}
+        <View style={styles.header}>
           <View style={styles.headerTop}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>{initial}</Text>
@@ -176,7 +175,7 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
           </Pressable>
         </View>
       </Animated.View>
-    </View>
+    </Modal>
   );
 }
 
@@ -184,10 +183,9 @@ const styles = StyleSheet.create({
   // Fills the (app) layout and sits above <Tabs> by sibling order. box-none so
   // only the dim layer and the panel take touches.
   // Written out rather than spread: `StyleSheet.absoluteFill` is a registered
-  // style ID, not an object, so the previous `...StyleSheet.absoluteFill`
-  // contributed nothing — harmless inside a Modal, which fills by itself, but
-  // not here.
-  host: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, elevation: 100 },
+  // style ID, not an object, so `...StyleSheet.absoluteFill` contributed
+  // nothing. Harmless here (the Modal fills by itself) but wrong, and it was a
+  // real bug during the in-tree overlay attempt. Kept explicit.
   overlay: {
     position: 'absolute',
     top: 0,
@@ -212,6 +210,7 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: colors.surface,
     paddingHorizontal: spacing.lg,
+    paddingTop: 48,
     paddingBottom: spacing.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
