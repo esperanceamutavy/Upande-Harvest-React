@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   Animated,
@@ -33,12 +33,23 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
   const farm = useFarm();
   const { logout } = useLogout();
 
-  const [modalVisible, setModalVisible] = useState(false);
-  const translateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+  // Lazy useState, not `useRef(...).current` — React 19's react-hooks rules
+  // reject reading a ref during render. Same fix as Segmented.tsx.
+  const [translateX] = useState(() => new Animated.Value(-DRAWER_WIDTH));
+
+  // `mounted` outlives `isOpen` by one animation so the panel can slide out
+  // before it unmounts. Opening flips it during render rather than from an
+  // effect — React's sanctioned alternative to setState-in-effect, and it
+  // avoids the cascading-render the lint rule was pointing at.
+  const [mounted, setMounted] = useState(isOpen);
+  const [prevOpen, setPrevOpen] = useState(isOpen);
+  if (prevOpen !== isOpen) {
+    setPrevOpen(isOpen);
+    if (isOpen) setMounted(true);
+  }
 
   useEffect(() => {
     if (isOpen) {
-      setModalVisible(true);
       Animated.spring(translateX, {
         toValue: 0,
         useNativeDriver: true,
@@ -50,9 +61,11 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
         toValue: -DRAWER_WIDTH,
         duration: 200,
         useNativeDriver: true,
-      }).start(() => setModalVisible(false));
+      }).start(({ finished }) => {
+        if (finished) setMounted(false);
+      });
     }
-  }, [isOpen]);
+  }, [isOpen, translateX]);
 
   function navigate(route: string) {
     onClose();
@@ -86,9 +99,14 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
 
   const initial = fullName && fullName.length > 0 ? fullName[0].toUpperCase() : 'U';
 
+  // Render nothing at all when closed. Screen mounts an AppDrawer per screen
+  // and the tab navigator retains screens, so a `visible={false}` Modal would
+  // leave one live Modal host per visited tab. Unmounting keeps exactly one.
+  if (!mounted) return null;
+
   return (
     <Modal
-      visible={modalVisible}
+      visible
       transparent
       animationType="none"
       onRequestClose={onClose}
