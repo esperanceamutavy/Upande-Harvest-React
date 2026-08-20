@@ -347,7 +347,7 @@ Note the reversal: §8.3 previously deleted `createOrUpdateFarmPackList` as "Kar
 
 **Every error is double-wrapped.** The script's outer handler is `except Exception as e: frappe.throw(_("Error processing packing: ") + str(e))`, and `frappe.throw` is how its own validations fire — so they get caught and re-thrown with the prefix. A Rule-2 rejection reaches the client as `Error processing packing: Bunch BUNCH-123 has not been graded in the system…`. **Match on substrings, never on equality.**
 
-`custom_farm` is assigned to a local (`user_farm`) and then never read. Send it anyway — harmless, and it is the obvious field to start honouring — but do not expect it to affect the write. On the create path neither customer nor farm is set on the Farm Pack List itself.
+`custom_farm` is assigned to a local (`user_farm`) and then never read. **Send it — it is not merely harmless, it is the value `Box Label.farm` needs**, and the fix for that is on the server side of the same wire (see the Box Label section). It does not affect the write today. On the create path neither customer nor farm is set on the Farm Pack List itself.
 
 #### Rule 2 — graded validation is ALREADY server-side. No backend work.
 
@@ -548,6 +548,52 @@ It becomes `box_number` on a `Box Label` keyed by `(order_pick_list, box_number)
 
 Internally the Farm Pack List stores the box number in a field named `bucket_id` on `pack_list_item`. Confusing, but that is the column — it is the box, not a coldroom bucket.
 
+#### 🔧 Box Label — the printable deliverable. ALL BACKEND WORK.
+
+> **SCOPE: none of this is client work.** Every item here is a change to `sync_box_label` inside the `createOrUpdateFarmPackList` Server Script. **Recorded, not to be attempted from this repo** — it needs Frappe site access and belongs to whoever owns the script. The packing screen can be built and shipped against the contract as it stands; labels will simply render incomplete until this lands.
+
+The `Box Label` print format is **Jinja with `raw_printing = 0`**, so the deliverable is a **rendered PDF attachment**, not an ESC/POS byte stream to a thermal printer. That matters for the client eventually — a PDF is fetched and shared/printed via the OS, not written to a socket — but nothing about it is blocked on the v1.1 Bluetooth printing work.
+
+**Six fields the format renders but `sync_box_label` never sets.** Each renders blank today:
+
+| Field | Renders as | Source |
+|---|---|---|
+| `farm` | `.farm-name` | the payload's `custom_farm` — **currently read into a local and discarded** |
+| `farm_code` | `.farm-subcode` — the `KE/032/0863/132` line | needs a source; farm master data |
+| `pack_rate` | `PACKRATE` line | `custom_packrate` on `Pick List Item` |
+| `box_total_count` | `.box-count` | the box count — `custom_total_stems / custom_packrate` (Rule 1) |
+| `qr_code` | `.qr-placeholder` | generate as the OPL already does for `custom_qr_code` |
+| `farm_pack_list_link` | link back to the FPL | **`fpl_name` is already a parameter of `sync_box_label` and ignored.** The field exists. One line. |
+
+`farm_pack_list_link` is the cheapest of the six by a wide margin — the value is already in scope at the call site, it is simply never assigned.
+
+Note this retires an earlier observation. §8.3 previously recorded `custom_farm` as "read into a local and never used — send it anyway, harmless." **It is not merely harmless: it is the input the label's `farm` field needs.** Keep sending it; the fix is on the server side of the same wire.
+
+**⛔ The header `length` field is WRONG and must be resolved, not just populated.**
+
+`Box Label.length` is a Link to `Stem Length` — a single value. But a box holds **one variety across one or more stem lengths, or several varieties when it is a mixed box**, so no single value can describe its contents. `sync_box_label` sets it once, from whichever row created the label, and never updates it. A box built from `50CM` then `60CM` bunches is labelled `50CM`.
+
+Two acceptable fixes; this is a decision, not a bug to patch:
+
+1. **Drop `length` from the format** and render per-row lengths from `box_item`, which already carries `length` per row. Cleanest — the data is already correct at row level.
+2. **Redefine it as an explicit summary** (dominant length, or a range like `50–60CM`) and document that it is not authoritative.
+
+Either way, **`box_item` rows are the real contents** — `.product-line` renders one per row — and the header field must not be trusted as a description of the box.
+
+**Day code — DEFERRED, NOT CANCELLED.**
+
+Every physical label carries a `DAY CODE: 6/02` line. **There is no field for it on the doctype**, and no derivation rule recorded anywhere. It is a **KEPHIS export requirement**, so a label without it is not merely cosmetically incomplete.
+
+Needs two things from whoever owns the paperwork: a new field on `Box Label`, and the derivation rule (what `6/02` counts from — day-of-week over week-of-year, packhouse day number, something else). **Out of scope for this phase.**
+
+Recorded explicitly so that **shipping a label without a day code is a decision on record, not something discovered at an inspection.**
+
+**Closure has no trigger — STILL OPEN.**
+
+Every `createOrUpdateFarmPackList` call is an incremental add. Nothing anywhere signals *"this box is finished"* — there is no close endpoint (§8.3 deletions), no status on `Box Label`, and no field the client could set. So there is no event on which to render and attach the PDF.
+
+The client knows when a box is full — Rule 1's cap is exactly that signal — but has no way to communicate it. Resolving this needs a backend affordance: a `close_box`-style call, a status transition, or rendering on the Nth add once `box_total_count` is known. **This is the gating question for the PDF deliverable**, and it is independent of the six missing fields: populating them without a closure trigger still leaves nothing that decides *when* to produce the document.
+
 #### Serialization — requirement stands, reasoning corrected
 
 Not a cap race. `createOrUpdateFarmPackList` does a **read-modify-write on the Farm Pack List document**:
@@ -594,22 +640,32 @@ Field mapping, confirmed against live records:
 
 `bunch_size` is already in the `Name(number)` form the script's paren parse requires — verified on live rows, not inferred.
 
-#### Mix boxes — not a deferral any more. Structurally absent.
+#### Mix boxes — a supported backend case we are deferring BY CHOICE
 
-The framing has changed twice; this is where it lands.
+This framing has been wrong three times. Each correction narrowed it further than the evidence supported; this version is deliberately the weakest claim the data will carry.
 
-**One OPL = one `item_code` = one variety, at several stem lengths.** A session scoped to an OPL cannot mix *varieties*, because there is no second variety in scope. Single-variety is not a convention the client upholds — it falls out of the data model.
+**`custom_is_mixed_box_pick_list` exists on the OPL.** It is `0` on both live samples — so **single-variety is what the current data happens to look like, NOT a structural guarantee.** Mixed boxes are a case the backend supports and models explicitly.
 
-Note the correction: an OPL is **not** single-length. `OPL-2026-02914` runs `50CM` and `60CM`; `OPL-2026-02172` runs `60/70/80CM`. So a box may legitimately hold several lengths of one variety, and `Box Label.box_item` rows keyed `(variety, length)` are exactly how that gets recorded. "Mixed lengths" is normal; "mixed varieties" is what does not occur.
+Withdrawn, in order:
 
-Everything the original §8.3 said about mix was void anyway: `PackBoxRecipe`, `is_mix_box`, `MixRecipeItem`, `PackableOpl.is_mix` and `get_pack_box_recipe` are all from the wrong site (§8.0) and none exist here. There is **no `is_mix` flag**, so the "filter mix OPLs out of the picker" requirement has nothing to filter and is withdrawn.
+1. ~~Mix machinery exists (`PackBoxRecipe`, `is_mix_box`, `MixRecipeItem`, `get_pack_box_recipe`)~~ — all from the wrong site (§8.0); none exist here. Still void.
+2. ~~"There is no `is_mix` flag, so there is nothing to filter"~~ — **false. `custom_is_mixed_box_pick_list` is that flag.** The filter requirement is reinstated: see the picker note below.
+3. ~~"Mix is structurally absent — a session scoped to an OPL cannot mix, it falls out of the data model"~~ — **false, and the most misleading of the three.** Nothing in the model forbids it; we simply have not seen one.
 
-For completeness: `Box Label.box_item` *is* a child table of `(variety, qty, uom, length)` rows and the script appends a row per unmatched `(variety, length)`, so a mixed box is representable in storage. But nothing routes two varieties into one box, because the client only ever holds one OPL's worth of `item_code`. **Mix would need a new selection model above the OPL, not a cap change** — a bigger piece of work than the earlier "rewrite Rule 1 per-recipe-line" note suggested.
+What holds:
+
+- A box's contents are its **`box_item` rows** — `(variety, qty, uom, length)`. One variety across several lengths, or several varieties in a mixed box. Both are representable and both render (`.product-line` per row).
+- **Mixed lengths within one variety are normal**, not an edge case — `OPL-2026-02914` runs `50CM` + `60CM`, `OPL-2026-02172` runs `60/70/80CM`.
+- **Deferring mix is a product choice**, and it needs enforcing rather than assuming. **The OPL picker should exclude, or clearly mark, any OPL with `custom_is_mixed_box_pick_list = 1`** — otherwise a packer eventually selects one and the screen behaves as though it were single-variety.
+
+Rule 3 is already correct for this case: it is expressed as a membership test over `item_locations` on `item_code` **and** `custom_stem_length`, not a comparison against one fixed variety, so it holds whether or not the OPL is mixed. No rework needed there when mix is picked up — the work is in selection and in the cap, not in validation.
 
 #### Residual risks to watch when building
 
 - **Check against a LIVE OPL, not a snapshot one.** OPL ids in this plan are illustrative (§8.0) — the snapshot tops out at `OPL-2026-00900` while live is past `OPL-2026-02904`. Anything below only means something when re-read from the live site.
-- **⛔ OPEN — what gets scanned into a `Stems`-uom OPL?** `OPL-2026-02921` has uom `Stems`, not `Bunch(N)`. The script's `bunch_uom.split("(")[1]` raises `IndexError` on that, throwing `Invalid bunch size format for UOM 'Stems'` — so **such an OPL cannot be packed through this endpoint using its own uom.** Either these are packed some other way, or their bunches carry a `Bunch(N)` of their own regardless of the OPL's uom, or they are not meant to reach this screen at all. **Resolve before building the OPL picker:** at minimum it should exclude or visibly mark them, rather than offering an OPL that fails on the first scan. This is now the only genuinely unanswered packing question.
+- **⛔ OPEN — what gets scanned into a `Stems`-uom OPL?** `OPL-2026-02921` has uom `Stems`, not `Bunch(N)`. The script's `bunch_uom.split("(")[1]` raises `IndexError` on that, throwing `Invalid bunch size format for UOM 'Stems'` — so **such an OPL cannot be packed through this endpoint using its own uom.** Either these are packed some other way, or their bunches carry a `Bunch(N)` of their own regardless of the OPL's uom, or they are not meant to reach this screen at all.
+- **⛔ OPEN — box closure has no trigger.** Nothing signals that a box is complete, so there is no event on which to render the Box Label PDF. Backend affordance required; see the Box Label section. Gates the printable deliverable, not the packing writes.
+- **The OPL picker has two exclusion criteria to settle before it is built**, both above: `Stems`-uom OPLs (cannot be packed at all as-is) and `custom_is_mixed_box_pick_list = 1` OPLs (deferred by choice). Offering either one means a packer hits a failure the screen never explains. Decide exclude-vs-mark for each.
 - **The silent warehouse fallback is Rule 3, not a watch item.** Promoted — see Rule 3. The `uom` half of this risk is **resolved**: `item_locations[*].uom` does use the same `Bunch(N)` form as `Bunch QR Code.bunch_size`, so a correct scan will not trip the fallback on a UOM mismatch.
 - **The doctype is spelled `Order Pick LIst`** — capital `I`. That typo is the actual doctype name; any direct query must reproduce it.
 - The OPL must have `item_locations`, or the call throws `Order Pick List has no location entries defined`.
@@ -649,7 +705,10 @@ Phases 1–5 are self-contained and shippable on their own. Ship the restyle fir
 
 **Grading is built** (§8.2). **Packing is unblocked and needs no backend change** (§8.3) — every parameter comes off the OPL's own `Pick List Item` rows in one fetch: `custom_packrate` for the per-box cap, `custom_total_stems / custom_packrate` for the box count, `item_locations[0].uom` for the bunch size. Three client-side rules are correctness requirements before it ships: Rule 2's one-bunch-per-scan so a rejection blames the right bunch, **Rule 3's two-field variety-and-length match plus the bunch-size check, so no bunch can silently land in the wrong warehouse or against the wrong row**, and Rule 1's stem cap with the "Box N of M" bound.
 
-**One open question remains, and it gates the OPL picker rather than the whole screen:** OPLs whose uom is `Stems` rather than `Bunch(N)` cannot be packed through this endpoint as-is (§8.3, residual risks). Decide whether the picker excludes them before it is built.
+**Two open questions remain, and neither blocks the packing writes:**
+
+1. **The OPL picker's exclusions** — `Stems`-uom OPLs cannot be packed through this endpoint at all, and mixed-box OPLs (`custom_is_mixed_box_pick_list = 1`) are deferred by choice. Both need an exclude-or-mark decision before the picker is built.
+2. **Box Label output is a separate, backend-side workstream** (§8.3) — six fields the print format renders but `sync_box_label` never sets, a header `length` field that cannot describe a real box, a missing day code that KEPHIS requires, and **no closure trigger to render the PDF on**. All of it is Server Script work needing Frappe site access, not client work. **The packing screen can ship without it**; labels simply render incomplete until it lands, and the day-code omission in particular is recorded so that shipping without it is a decision rather than a surprise at inspection.
 
 **Confidence is split, and the split matters** (§8.0): endpoint *existence* is confirmed live, but every script *body* comes from a bench snapshot ~27 July 2026. Three snapshot-sourced behaviours carry the correctness rules and are tagged 🟡 at their use sites. They cost three deliberate scans to confirm — a successful pack, an ungraded bunch, a wrong-variety bunch — and that should happen on the first live packing session rather than after it.
 
