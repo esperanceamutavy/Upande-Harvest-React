@@ -49,6 +49,7 @@ export default function AppLayout() {
       <Tabs.Screen name="rejects" options={{ href: null }} />
       <Tabs.Screen name="configure" options={{ href: null }} />
       <Tabs.Screen name="erp-desk" options={{ href: null }} />
+      <Tabs.Screen name="grading" options={{ href: null }} />
       <Tabs.Screen name="stock-entry/[id]" options={{ href: null }} />
 
       {/* Phase 2 verification harness — delete with the route file in Phase 5 */}

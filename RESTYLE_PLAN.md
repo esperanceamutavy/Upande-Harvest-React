@@ -190,21 +190,36 @@ So the answer follows from §8.3(a):
 
 **Recommendation, raised from neutral:** serialize `add_bunch_to_box` and `pack_bunch_to_opl` **unless the backend owner confirms atomic enforcement.** Serializing when it turns out to be unnecessary costs a little scan latency; not serializing when it was necessary overfills boxes in the field. The asymmetry favours the guard, so it should be the default and removed only on a confirmed answer.
 
-### 8.2 Grading — unblocked, online-only, core flow only
+### 8.2 Grading — unblocked, online-only, core flow only. ✅ BUILT
 
-Three calls:
+**CORRECTION — it is two calls, not three. `getBunchInfo` is not part of grading.**
+
+This section originally listed `frappe.client.get_value` on `Bunch QR Code` as one of three grading calls. It is defined at `api.ts:467`, but its **only consumer is `XfloraPackingScreen.tsx:199`** — the grading path does not call it. Production removed the pre-fetch deliberately, and left the reason in the source (`GradeScreen.tsx:284-287`):
+
+> *"we no longer pre-fetch bunch_size + stem_length here. The server's Mobile Grading Entry API reads them from the Bunch QR Code directly, so the pre-fetch was a redundant 150-300ms round-trip per scan. Sending empty strings is equivalent for the server."*
+
+Re-adding it would put 150–300ms back on **every scan** in the app's fastest-repeating flow. We send `bunch_size: ''`, `stem_length: ''`, `variety: ''`, `qty: 0` and let the server resolve; it echoes back what it resolved.
 
 | Endpoint | Payload | Source |
 |---|---|---|
-| `frappe.client.get_value` | `{ doctype: 'Bunch QR Code', filters: { name: bunchId }, fieldname: ['bunch_size', 'stem_length', 'item_code'] }` | `api.ts:467` (`getBunchInfo`) |
 | `upande_harvest.api.get_grader_open_bucket` | `{ grader }` | `api.ts:955` |
-| `mobile_grading_entry` | `{ bunch_id, grader, bucket_id, farm, bunch_size?, stem_length?, qty?, variety?, posting_date?, posting_time? }` | `api.ts:446` |
+| `mobile_grading_entry` | `{ bunch_id, grader, bucket_id, farm, bunch_size: '', stem_length: '', variety: '', qty: 0 }` | `api.ts:446`, `GradeScreen.tsx:288-297` |
+
+Response of `mobile_grading_entry`: `{ message, stock_entry, variety, source_item, stem_length, qty, bucket_remaining_stems? }` (`types/index.ts:100-110`). Ignore `bucket_remaining_stems` — production documents it as unreliable on re-used buckets (it sums every cycle and floors at 0).
 
 `get_grader_open_bucket` returns `{ open, receiving_out, bucket_id, variety, initial_qty, remaining_qty, opened_at }` and `open: false` when the grader holds no open Receiving Out. In the grading flow that is an error state, not a no-op (`api.ts:951-953`). Responses unwrap as `res.message ?? res`.
 
 **`bunch_size` and `stem_length` are read off the ERP `Bunch QR Code` record** (`api.ts:465-466`). There is therefore **no client-side `item_group` derivation and no lockout window**. Any `Grader3` / `SPRAY` substring / 100-second lockout / `DATE_SUB` vs `add_to_date` UTC-vs-EAT note is **Kikwetu's and has been deleted from this plan.** Do not reintroduce it.
 
 **Out of scope:** sqlite, the sync queue, the stem pool (`addToPool` / `gradeFromPool` / `getPoolStatus`), bouquet grading, bucket balance, rejects.
+
+**As built** — `src/app/(app)/grading.tsx`, drawer-only (`href: null`), plus `features/grading/{gradingQr,useGraderOpenBucket,useSubmitGrading}.ts`, `types/grading.ts`, `lib/serializeByKey.ts`:
+
+- **Direct-to-Grader, two scans.** Badge → `get_grader_open_bucket`; `open: false` produces "*X has no open bucket. Do Receiving Out first.*" rather than letting the bunch scan fail deeper in. Then bunch → submit. The grader stays latched across bunches, so a whole bucket is graded on one badge scan.
+- **`bucket_id` is sent explicitly**, taken from the resolved open bucket, rather than the `''` production sends in DTG mode. The pre-flight already guarantees it exists, and it keeps the bucket the screen displays and the bucket the server writes to provably the same.
+- **QR routing is type-aware.** `detectGradingQrType` ports the legacy JSON-key and string-prefix detection, so a badge scanned into the bunch field re-latches the grader instead of being submitted as a bunch. Bucket-type QRs are rejected with the DTG message, as in the reference.
+- **Writes are serialized** through `serializeByKey('grading', …)` — §8.1. Lives in `lib/serializeByKey.ts`, not `lib/api.ts` (constraint 3).
+- Open-bucket state is refreshed after each submit so `remaining / initial` tracks the write. That refresh failing is non-fatal: the grade landed, only the counter is stale.
 
 ### 8.3 Packing — unblocked
 

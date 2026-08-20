@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  Hexagon,
   LayoutGrid,
   PackageCheck,
   PackagePlus,
@@ -30,13 +31,14 @@ export const WORKFLOW_ITEMS: DrawerItem[] = [
   { label: 'Bucket Transfer', icon: ArrowLeftRight, route: '/bucket-transfer' },
   { label: 'Shelving', icon: LayoutGrid, route: '/shelving' },
   { label: 'Issuing', icon: PackageCheck, route: '/issuing' },
+  { label: 'Grading', icon: Hexagon, route: '/grading' },
   // TEMPORARY — Phase 2 device-verification entry point. Delete in Phase 5.
   { label: 'UI Preview', icon: LayoutGrid, route: '/ui-preview' },
   //
-  // v2 candidates (ship via OTA once spec'd against the live backend — §6):
-  //   Grading → Hexagon → '/grading'
-  //   Packing → Box     → '/packing'
-  //   Staging → Boxes   → '/staging'
+  // Still to come (RESTYLE_PLAN.md §8):
+  //   Packing → Box   → '/packing'  — blocked on the three add_bunch_to_box
+  //                                   questions in §8.3
+  //   Staging → Boxes → '/staging'
 ];
 
 export const UTILITY_ITEMS: DrawerItem[] = [
