@@ -608,15 +608,24 @@ Both fields are **strings** on `Pick List Item` — parse before dividing, or `"
 
 **Rule 1's arithmetic still holds.** `custom_packrate` and `custom_total_stems` share whatever unit was used, so `total / cap` is still the correct box count. Nothing about the box maths changes.
 
-**What must change is every label.** Do not call either value "stems" — not in the UI, not in this document. A neutral word ("per box", "order total", or a bare number) is honest on a well-formed OPL and on a broken one alike. Applied in `packing.tsx`: the counter renders `n / cap` with no unit, and the detail rows read `Per box` / `Order total`.
+**What must change is every label.** Do not call either value "stems" — not in the UI, not in this document.
 
-**The distinction that decides which values MAY say "stems":**
+#### The UI counts in BUNCHES. Stems are an ERP unit.
 
-| Derived from | Trustworthy? | Labelled |
+Packers scan bunches and think in bunches, so **every number the packing screen shows is a bunch count**, converted at the point of render. Nothing about Rule 1 changes: the cap is still enforced in the OPL's own unit, with `unitsInBox` compared against `capPerBox`, so like is compared with like. `bunchesInBox` / `bunchesPacked` are display-only counters that Rule 1 never reads.
+
+| Shown | Source | Note |
 |---|---|---|
-| `Bunch QR Code.bunch_size` → `Bunch(10)` → 10 | yes — we parse it ourselves | **"stems"** — the per-bunch increment and the item lines |
-| `Pick List Item.qty × conversion_factor` | yes — both are real per-row numbers | **"stems"** — the item lines |
-| `custom_packrate`, `custom_total_stems` | **no** | unit-neutral |
+| item line — `8 bunches · Bunch(10) · shelf A1T` | `Math.round(row.qty)` | `qty` is **already** in bunches. A fraction means the OPL is wrong (allocator defect below) — round and move on rather than showing `0.8 ×` to a packer mid-shift. |
+| counter — `Box 1 of 2 — 0 of 4 bunches` | `capBunches = round(capPerBox / stemsPerBunch)` | |
+| order progress — `0 of 8 bunches` | `totalBunches = round(totalUnits / stemsPerBunch)` | |
+| `Bunch size` row, on both cards | `item_locations[0].uom` | So a packer can check they have `Bunch(10)` and not `Bunch(12)` — a wrong-size bunch passes **both** Rule 1 and Rule 3, the unguarded gap recorded above. The session log also stamps each scan with its own `bunch_uom` for the same reason. |
+
+**`stemsPerBunch` is read off the OPL row's `uom`, never assumed** — `Bunch(10)` and `Bunch(12)` are both live.
+
+**Why one divisor works despite the unreliable unit:** Rule 1's increment is *also* `stemsPerBunch`, so the bunches a box admits is `cap / stemsPerBunch` by construction. The display therefore mirrors what the app will actually allow, rather than what the OPL claims. On a malformed OPL it collapses toward 1 — the same tenth-of-the-order symptom recorded below, surfaced rather than hidden.
+
+**Fallback:** `stemsPerBunch` is null when the OPL's uom is not in `Name(n)` form (`Stems`-uom OPLs exist), and every bunch figure falls back to the raw unit-neutral numbers.
 
 #### 🔴 BACKEND DEFECT — the allocator appears to ignore `conversion_factor`
 

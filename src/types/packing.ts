@@ -17,8 +17,6 @@ export interface OplRow {
   shelf: string | null;
   /** Bunches, and CAN BE FRACTIONAL (e.g. 8.5, 0.8). Never used for box maths. */
   qty: number;
-  /** Stems per bunch for this row's uom, e.g. 10 for `Bunch(10)`. */
-  conversionFactor: number;
   /** The per-box cap. A string on the wire; identical across an OPL's rows.
    *  Named "packrate" upstream — see the unit caveat on `totalUnits`. */
   packRate: string | null;
@@ -67,6 +65,17 @@ export interface PackingSession {
   capPerBox: number;
   /** `int(custom_total_stems) / capPerBox`, rounded up. The M in "Box N of M". */
   boxCount: number;
+
+  // ── DISPLAY ONLY. Packers scan bunches and think in bunches; stems are an
+  // ERP unit. None of these participate in Rule 1 — the cap is still enforced
+  // in the OPL's own unit so like is compared with like.
+  /** Parsed from the OPL row's `uom`, e.g. 10 from `Bunch(10)`. Null when the
+   *  OPL's uom is not in `Name(n)` form — `Stems`-uom OPLs exist. */
+  stemsPerBunch: number | null;
+  /** How many bunches fit a box. Null when `stemsPerBunch` is. */
+  capBunches: number | null;
+  /** How many bunches the whole order is. Null when `stemsPerBunch` is. */
+  totalBunches: number | null;
 }
 
 /** A bunch resolved from its QR, ready to validate and submit. */

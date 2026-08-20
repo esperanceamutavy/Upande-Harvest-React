@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
+import { parseStemsPerBunch } from './useBunchDetails';
 import type { OrderPickList, OplRow, PackingSession } from '../../types/packing';
 
 // POST /api/method/frappe.client.get { doctype: 'Order Pick LIst', name }
@@ -21,7 +22,6 @@ function toRow(r: Record<string, unknown>): OplRow {
     warehouse: r.warehouse != null ? String(r.warehouse) : null,
     shelf: r.custom_shelf != null ? String(r.custom_shelf) : null,
     qty: Number(r.qty ?? 0),
-    conversionFactor: Number(r.conversion_factor ?? 0),
     packRate: r.custom_packrate != null ? String(r.custom_packrate) : null,
   };
 }
@@ -87,5 +87,18 @@ export function deriveSession(opl: OrderPickList): PackingSession | null {
   // Ceil: a trailing partial box is still a box that gets packed.
   const boxCount = Math.max(1, Math.ceil(totalUnits / capPerBox));
 
-  return { opl, capPerBox, boxCount };
+  // ── Display conversion. Bunch size varies per OPL — Bunch(10) and Bunch(12)
+  // are both live — so it is read off the row's uom, never assumed.
+  //
+  // The same divisor works whatever unit the OPL used, because Rule 1's
+  // increment is ALSO stemsPerBunch: the bunches a box admits is exactly
+  // cap / stemsPerBunch by construction, so the display mirrors what the app
+  // will actually allow rather than what the OPL claims. On a malformed OPL
+  // (§8.3, allocator defect) this collapses toward 1, which is the same
+  // tenth-of-the-order symptom already recorded — honest, not hidden.
+  const stemsPerBunch = parseStemsPerBunch(first.uom);
+  const capBunches = stemsPerBunch ? Math.max(1, Math.round(capPerBox / stemsPerBunch)) : null;
+  const totalBunches = stemsPerBunch ? Math.max(1, Math.round(totalUnits / stemsPerBunch)) : null;
+
+  return { opl, capPerBox, boxCount, stemsPerBunch, capBunches, totalBunches };
 }

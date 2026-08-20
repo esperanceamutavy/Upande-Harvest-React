@@ -79,6 +79,10 @@ export default function PackingScreen() {
   // it is not — see the allocator defect in §8.3.
   const [unitsInBox, setUnitsInBox] = useState(0);
   const [unitsPacked, setUnitsPacked] = useState(0);
+  // DISPLAY ONLY — plain bunch counts. Rule 1 never reads these; it compares
+  // unitsInBox against capPerBox so like is compared with like.
+  const [bunchesInBox, setBunchesInBox] = useState(0);
+  const [bunchesPacked, setBunchesPacked] = useState(0);
 
   const [entries, setEntries] = useState<PackEntry[]>([]);
   const [feedback, setFeedback] = useState<FeedbackMsg | null>(null);
@@ -144,6 +148,8 @@ export default function PackingScreen() {
       setBoxNumber(1);
       setUnitsInBox(0);
       setUnitsPacked(0);
+      setBunchesInBox(0);
+      setBunchesPacked(0);
       setEntries([]);
       packedIdsRef.current = new Set();
       setBunchProgrammatic('');
@@ -162,6 +168,8 @@ export default function PackingScreen() {
     setBoxNumber(1);
     setUnitsInBox(0);
     setUnitsPacked(0);
+    setBunchesInBox(0);
+    setBunchesPacked(0);
     setEntries([]);
     packedIdsRef.current = new Set();
     setFeedback(null);
@@ -263,21 +271,29 @@ export default function PackingScreen() {
 
       // Commit box state only after the write lands.
       packedIdsRef.current.add(bunchId);
+      // A new box resets the in-box bunch count; the order total keeps rising.
+      const bunchesAfter = (plan.boxId === boxNumber ? bunchesInBox : 0) + 1;
       setBoxNumber(plan.boxId);
       setUnitsInBox(plan.unitsAfter);
       setUnitsPacked((prev) => prev + bunch.stemsPerBunch);
+      setBunchesInBox(bunchesAfter);
+      setBunchesPacked((prev) => prev + 1);
 
       playSubmit();
       setFeedback({
         tone: 'success',
-        text: `Box ${plan.boxId} — ${plan.unitsAfter}/${s.capPerBox} · ${bunch.itemCode} ${bunch.stemLength}`,
+        text: `Box ${plan.boxId} — ${
+          s.capBunches != null
+            ? `${bunchesAfter} of ${s.capBunches} bunches`
+            : `${plan.unitsAfter}/${s.capPerBox}`
+        } · ${bunch.itemCode} ${bunch.stemLength}`,
       });
       logEntry({
         bunchId,
         boxId: plan.boxId,
         status: 'packed',
         rejection: null,
-        detail: `${bunch.itemCode} ${bunch.stemLength} · +${bunch.stemsPerBunch} stems${
+        detail: `${bunch.itemCode} ${bunch.stemLength} · ${bunch.bunchUom}${
           res.docname ? ` · ${res.docname}` : ''
         }`,
       });
@@ -373,8 +389,21 @@ export default function PackingScreen() {
           {/* Unit-neutral on purpose: custom_packrate and custom_total_stems
               share a unit, but it is NOT reliably stems (§8.3), so labelling
               them would be a lie on any OPL the allocator got wrong. */}
-          <DetailRow label="Per box" value={`${session.capPerBox}`} />
-          <DetailRow label="Order total" value={session.opl.totalUnits ?? '—'} />
+          <DetailRow label="Bunch size" value={session.opl.rows[0]?.uom ?? '—'} />
+          <DetailRow
+            label="Per box"
+            value={
+              session.capBunches != null ? `${session.capBunches} bunches` : `${session.capPerBox}`
+            }
+          />
+          <DetailRow
+            label="Order total"
+            value={
+              session.totalBunches != null
+                ? `${session.totalBunches} bunches`
+                : (session.opl.totalUnits ?? '—')
+            }
+          />
           <DetailRow label="Boxes" value={`${session.boxCount}`} />
         </View>
         <Button
@@ -392,12 +421,13 @@ export default function PackingScreen() {
               <Text style={styles.itemTitle} numberOfLines={1}>
                 {row.itemCode} · {row.stemLength}
               </Text>
-              {/* Stems, not the fractional bunch count: "0.8 × Bunch(10)" is
-                  unreadable on a shop floor. qty × conversion_factor is the
-                  real stem count; the bunch size stays visible because the
-                  packer needs it. Rounded — 8.333… × 12 is 99.999…, not 100. */}
+              {/* Whole bunches. `qty` is already in bunches, so this is just a
+                  round — a fraction like 0.8 means the OPL itself is wrong
+                  (§8.3, allocator defect), and surfacing that to a packer mid
+                  shift helps nobody. The bunch size stays alongside because the
+                  packer needs to check it. */}
               <Text style={styles.itemMeta} numberOfLines={1}>
-                {Math.round(row.qty * row.conversionFactor)} stems · {row.uom}
+                {Math.round(row.qty)} bunches · {row.uom}
                 {row.shelf ? ` · shelf ${row.shelf}` : ''}
               </Text>
             </View>
@@ -408,13 +438,23 @@ export default function PackingScreen() {
       {/* Persistent counter — shown always, not only on error. */}
       <Card title={`Box ${boxNumber} of ${session.boxCount}`}>
         <Text style={styles.counter}>
-          {unitsInBox} / {session.capPerBox}
+          {session.capBunches != null
+            ? `${bunchesInBox} of ${session.capBunches} bunches`
+            : `${unitsInBox} / ${session.capPerBox}`}
         </Text>
         <View style={styles.rows}>
           <DetailRow
             label="Order progress"
-            value={`${unitsPacked} / ${session.opl.totalUnits ?? '—'}`}
+            value={
+              session.totalBunches != null
+                ? `${bunchesPacked} of ${session.totalBunches} bunches`
+                : `${unitsPacked} / ${session.opl.totalUnits ?? '—'}`
+            }
           />
+          {/* Surfaced so a packer can sanity-check they have Bunch(10) and not
+              Bunch(12): a wrong-size bunch passes both Rule 1 and Rule 3 today
+              — the unguarded gap recorded in §8.3. */}
+          <DetailRow label="Bunch size" value={session.opl.rows[0]?.uom ?? '—'} />
           <DetailRow label="Variety" value={session.opl.rows[0]?.itemCode ?? '—'} />
           <DetailRow label="Lengths" value={lengths || '—'} />
         </View>
