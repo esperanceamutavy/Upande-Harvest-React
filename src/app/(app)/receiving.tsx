@@ -1,14 +1,5 @@
 import { useRef, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Check, QrCode } from 'lucide-react-native';
 
 import { useCreateXfloraReceivingEntry } from '../../features/receiving/useCreateXfloraReceivingEntry';
@@ -16,9 +7,9 @@ import { playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
 import { extractFrappeError } from '../../lib/api';
 import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOverlay';
-import { AppBar } from '../../components/ui/AppBar';
+import { Card, Notice, type NoticeTone } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
-import { Pill } from '../../components/ui/Pill';
+import { Screen } from '../../components/ui/Screen';
 import { colors, radii, spacing } from '../../components/ui/theme';
 
 const ACCENT = colors.accent;
@@ -26,7 +17,7 @@ const ACCENT = colors.accent;
 // Port of xflora_receiving_entry.dart:37
 const BUNCH_SIZES = [5, 7, 9, 10, 13] as const;
 
-type FeedbackMsg = { type: 'success' | 'warning' | 'error'; text: string };
+type FeedbackMsg = { tone: NoticeTone; text: string };
 
 function isValidJson(text: string): boolean {
   try {
@@ -48,7 +39,6 @@ function generateBatchId(): string {
 }
 
 export default function ReceivingScreen() {
-  const router = useRouter();
   const createReceivingEntry = useCreateXfloraReceivingEntry();
 
   const [bucketInput, setBucketInput] = useState('');
@@ -68,7 +58,7 @@ export default function ReceivingScreen() {
   const textInputRef = useRef<TextInput>(null);
 
   function warn(text: string) {
-    setFeedback({ type: 'warning', text });
+    setFeedback({ tone: 'warn', text });
     playError();
     haptics.medium();
   }
@@ -132,7 +122,7 @@ export default function ReceivingScreen() {
     }
 
     if (!bucketId) {
-      setFeedback({ type: 'error', text: 'Invalid label: no bucket_id found.' });
+      setFeedback({ tone: 'danger', text: 'Invalid label: no bucket_id found.' });
       playError();
       resetState();
       return;
@@ -159,11 +149,11 @@ export default function ReceivingScreen() {
         res.overrideApplied && res.qty != null
           ? `Received ${res.qty.toLocaleString()} stems (partial)`
           : res.message;
-      setFeedback({ type: 'success', text });
+      setFeedback({ tone: 'success', text });
     } catch (e) {
       playError();
       haptics.medium();
-      setFeedback({ type: 'error', text: extractFrappeError(e) });
+      setFeedback({ tone: 'danger', text: extractFrappeError(e) });
     } finally {
       resetState();
     }
@@ -216,14 +206,8 @@ export default function ReceivingScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.root}>
-      <AppBar title="Receiving Entry" onBack={() => router.back()} />
-
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
+    <Screen title="Receiving Entry">
+      <Card title="Receiving mode">
         <View style={styles.form}>
           {/* Batch Receiving toggle */}
           <Pressable onPress={toggleBatchMode} style={styles.toggleRow}>
@@ -269,11 +253,14 @@ export default function ReceivingScreen() {
               </Text>
             </View>
           </Pressable>
+        </View>
+      </Card>
 
-          {/* Bunch size + quantity (only when bunched) */}
-          {isBunched ? (
-            <View style={styles.bunchCard}>
-              <Text style={styles.bunchTitle}>Bunch Size</Text>
+      {/* Bunch size + quantity (only when bunched) */}
+      {isBunched ? (
+        <Card title="Bunch details">
+          <View style={styles.form}>
+            <Field label="Bunch Size">
               <View style={styles.chipRow}>
                 {BUNCH_SIZES.map((size) => {
                   const selected = selectedBunchSize === size;
@@ -293,82 +280,81 @@ export default function ReceivingScreen() {
                   );
                 })}
               </View>
+            </Field>
 
-              <Field label="Quantity (number of bunches)">
-                <TextInput
-                  style={styles.input}
-                  value={quantity}
-                  onChangeText={(t) => setQuantity(t.replace(/[^0-9]/g, ''))}
-                  keyboardType="number-pad"
-                  placeholder="Enter number of bunches"
-                  placeholderTextColor={colors.muted}
-                  editable={!loading}
-                />
-              </Field>
-            </View>
-          ) : null}
-
-          {/* Partial override stems (only when partial) — persists across scans */}
-          {isPartial ? (
-            <View style={styles.bunchCard}>
-              <Field label="Override stems (partial bucket)">
-                <TextInput
-                  style={styles.input}
-                  value={overrideQty}
-                  onChangeText={(t) => setOverrideQty(t.replace(/[^0-9]/g, ''))}
-                  keyboardType="number-pad"
-                  placeholder="Enter stems received"
-                  placeholderTextColor={colors.muted}
-                  editable={!loading}
-                />
-              </Field>
-            </View>
-          ) : null}
-
-          {/* Bucket QR field — HID-aware; JSON terminator triggers processing */}
-          <Field label="Scan Bucket QR">
-            <View style={styles.scanRow}>
+            <Field label="Quantity (number of bunches)">
               <TextInput
-                ref={textInputRef}
-                style={[styles.input, styles.scanInput]}
-                value={bucketInput}
-                onChangeText={onChangeText}
-                autoFocus
-                autoCapitalize="characters"
-                placeholder={loading ? 'Processing…' : 'Scan bucket QR code…'}
+                style={styles.input}
+                value={quantity}
+                onChangeText={(t) => setQuantity(t.replace(/[^0-9]/g, ''))}
+                keyboardType="number-pad"
+                placeholder="Enter number of bunches"
                 placeholderTextColor={colors.muted}
                 editable={!loading}
               />
-              <Pressable
-                style={styles.qrBtn}
-                onPress={() => {
-                  if (!loading) setScannerVisible(true);
-                }}
-              >
-                <QrCode size={22} color={ACCENT} />
-              </Pressable>
-            </View>
+            </Field>
+          </View>
+        </Card>
+      ) : null}
+
+      {/* Partial override stems (only when partial) — persists across scans */}
+      {isPartial ? (
+        <Card title="Partial bucket">
+          <Field label="Override stems">
+            <TextInput
+              style={styles.input}
+              value={overrideQty}
+              onChangeText={(t) => setOverrideQty(t.replace(/[^0-9]/g, ''))}
+              keyboardType="number-pad"
+              placeholder="Enter stems received"
+              placeholderTextColor={colors.muted}
+              editable={!loading}
+            />
           </Field>
+        </Card>
+      ) : null}
 
-          {feedback ? <Pill variant={feedback.type}>{feedback.text}</Pill> : null}
+      {/* Bucket QR field — HID-aware; JSON terminator triggers processing */}
+      <Card title="Scan bucket">
+        <Field label="Scan Bucket QR">
+          <View style={styles.scanRow}>
+            <TextInput
+              ref={textInputRef}
+              style={[styles.input, styles.scanInput]}
+              value={bucketInput}
+              onChangeText={onChangeText}
+              autoFocus
+              autoCapitalize="characters"
+              placeholder={loading ? 'Processing…' : 'Scan bucket QR code…'}
+              placeholderTextColor={colors.muted}
+              editable={!loading}
+            />
+            <Pressable
+              style={styles.qrBtn}
+              onPress={() => {
+                if (!loading) setScannerVisible(true);
+              }}
+            >
+              <QrCode size={22} color={ACCENT} />
+            </Pressable>
+          </View>
+        </Field>
+      </Card>
 
-          <Text style={styles.hint}>Scan a bucket QR code to record receipt</Text>
-        </View>
-      </ScrollView>
+      {feedback ? <Notice tone={feedback.tone}>{feedback.text}</Notice> : null}
+
+      <Text style={styles.hint}>Scan a bucket QR code to record receipt</Text>
 
       <BarcodeScannerOverlay
         visible={scannerVisible}
         onScan={handleCameraScan}
         onCancel={() => setScannerVisible(false)}
       />
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  scroll: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
   form: { gap: spacing.md },
   toggleRow: {
     flexDirection: 'row',
@@ -390,15 +376,6 @@ const styles = StyleSheet.create({
   toggleLabels: { flex: 1, gap: 2 },
   toggleLabel: { fontSize: 14, fontWeight: '600', color: colors.primary },
   toggleHint: { fontSize: 12, color: colors.muted },
-  bunchCard: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  bunchTitle: { fontSize: 14, fontWeight: '600', color: colors.primary },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   chip: {
     paddingHorizontal: spacing.md,
