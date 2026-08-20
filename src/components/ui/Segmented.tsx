@@ -6,7 +6,7 @@
 // content is already gap-spaced, so a baked-in margin would double up. Callers
 // that need spacing pass `style`.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Animated,
   Pressable,
@@ -47,7 +47,11 @@ export function Segmented<T extends string>({
   const PADDING = 4;
   const innerWidth = Math.max(0, containerWidth - PADDING * 2);
   const segmentWidth = options.length > 0 ? innerWidth / options.length : 0;
-  const anim = useRef(new Animated.Value(activeIndex)).current;
+  // Lazy useState, not useRef. The reference holds the Animated.Value in a ref
+  // and reads `.current` during render, which React 19's react-hooks rules
+  // reject ("Cannot access refs during render"). Fixing forward per hard
+  // constraint 2 — packhouse is on React 18, where this was still allowed.
+  const [anim] = useState(() => new Animated.Value(activeIndex));
 
   useEffect(() => {
     Animated.spring(anim, {
