@@ -1,9 +1,10 @@
 # Restyle Plan — aligning xflora-rn to the Upande Packhouse design system, + Grading and Packing
 
-> **Reference (read-only):** `mark-judah/upande-packhouse` — Expo SDK 54 / RN 0.81.5, expo-router, Ionicons, zustand + repository pattern.
+> **Reference for the LOOK (read-only):** `mark-judah/upande-packhouse` — Expo SDK 54 / RN 0.81.5, expo-router, Ionicons, zustand + repository pattern.
+> **Reference for the CONTRACT (read-only):** `teddy5456/Upande-Harvest-React` — the live Xflora app. Endpoints and payloads only, no code. See §8.0.
 > **This app:** Expo SDK 56 / RN 0.85.3 / React 19.2.3, expo-router, **lucide-react-native**, **react-query**, expo-secure-store, Sentry.
 >
-> **Scope:** adopt the packhouse *visual system* and its `Screen` / `Card` / `Alert` primitives. Keep our dashboard, our data layer, our auth, our router, our SDK version. Then port Grading and Packing from the `kikwetu` branch.
+> **Scope:** adopt the packhouse *visual system* and its `Screen` / `Card` / `Notice` primitives. Keep our dashboard, our data layer, our auth, our router, our SDK version. Then build Grading and Packing fresh against Xflora's own contract.
 >
 > **Decisions taken:** restyle in place (not folding into the packhouse repo); Xflora's steel-blue accent `#699dcd` is retired for full monochrome.
 
@@ -132,29 +133,142 @@ Then backfill only what the screens actually need — resist porting all twelve.
 
 ## 8. Phase 6 — Grading and Packing
 
-**These already exist on the `kikwetu` branch of this repo**, in this architecture — expo-router, lucide, react-query, `useStation`, `playSubmit` / `playError`, `haptics`, `extractFrappeError`, `BarcodeScannerOverlay`, `Picker`, `Pill`.
+**Backend status on `xflora.upande.com`:** the APIs exist through packing. **Grading and Packing are UNBLOCKED.** Dispatch has no endpoints and stays blocked — see §8.4.
+
+### 8.0 Source split — read this first
+
+Two reference repos, and they are authoritative for different things. Mixing them up is how Kikwetu's and Karen's business rules leak into Xflora.
+
+| | Repo | Authoritative for | Never take |
+|---|---|---|---|
+| **Look** | `mark-judah/upande-packhouse` → `/tmp/packhouse` | `Screen` / `Card` / `Notice` / `Button`, layout, component structure | business logic, endpoints, payloads |
+| **Contract** | `teddy5456/Upande-Harvest-React` → `/tmp/xflora-legacy` | endpoint names, payload shapes, response envelopes, write ordering | architecture, any code |
+
+```bash
+git clone --depth 1 https://github.com/teddy5456/Upande-Harvest-React.git /tmp/xflora-legacy
+```
+
+**Do not port from `/tmp/xflora-legacy`.** It is React Navigation + expo-sqlite + an offline sync queue on SDK 54. We take the *contract only* and build fresh on `Screen` / `Card` / `Notice` + react-query. Every endpoint below is in `/tmp/xflora-legacy/src/services/api.ts`.
+
+Note that packhouse's packing screen lives at `src/tenants/karen/features/packing/PackingScreen.tsx` — under `tenants/karen`. The path itself is the warning: that file's flow is Karen's, and only its layout transfers.
+
+The earlier plan to `git checkout origin/kikwetu -- <path>` the Kikwetu grading/packing screens **is withdrawn.** Those screens encode Kikwetu's rules against Kikwetu's endpoints; neither matches Xflora.
+
+### 8.1 Hard requirement — write serialization
+
+`submitGrading` is wrapped in `serializedByKey('grading', …)` — `api.ts:460`, with the rationale at `api.ts:486-492`. Same-key submissions run strictly one at a time: on slow networks, rapid scanning lets request N+1 reach the server before N's ACK, and for Stock-Entry writes that corrupts bucket state.
+
+**React Query mutations run in parallel by default, so this guard does not come for free — it must be carried across explicitly.** A per-key in-flight promise map (`api.ts:493-507`) is the reference implementation: same key queues, different keys stay parallel, and a rejected predecessor still lets the successor run.
+
+This is a correctness requirement, not an optimisation. A grading screen without it will corrupt bucket state in the field under exactly the conditions it is used in — fast repeated scans on coldroom Wi-Fi.
+
+**OPEN QUESTION — do not decide unilaterally.** The legacy app serializes five keys: `grading` (460), `harvest` (523), `receiving` (543), `issuing` (892, 900), `receiving_out` (930). It does **not** serialize `add_bunch_to_box` (583) or `pack_bunch_to_opl` (607), which are also scan-driven writes. Either that is a deliberate exemption because boxes tolerate concurrent appends, or it is a latent bug the legacy app has not hit yet. **Resolve with the backend owner before building Packing.**
+
+**The §8.3 pack-rate cap narrows this question sharply.** A stem cap is a read-modify-write against a shared per-box total: read `stemsInBox`, add `incomingBunchSize`, compare to `pack_rate`. Two concurrent scans can both read the same total, both pass the check, and both commit — overfilling the box. That is precisely the corruption `serializedByKey` exists to prevent, and it means the "boxes tolerate concurrent appends" reading only holds if the box has no cap. It has one.
+
+So the answer follows from §8.3(a):
+
+- **If `add_bunch_to_box` enforces the cap atomically server-side**, client serialization is a UX nicety — the server is the guard, and a concurrent scan gets a clean rejection.
+- **If the client is the only enforcement**, concurrent scans defeat the cap outright and serialization is **mandatory**, exactly as it is for grading.
+
+**Recommendation, raised from neutral:** serialize `add_bunch_to_box` and `pack_bunch_to_opl` **unless the backend owner confirms atomic enforcement.** Serializing when it turns out to be unnecessary costs a little scan latency; not serializing when it was necessary overfills boxes in the field. The asymmetry favours the guard, so it should be the default and removed only on a confirmed answer.
+
+### 8.2 Grading — unblocked, online-only, core flow only
+
+Three calls:
+
+| Endpoint | Payload | Source |
+|---|---|---|
+| `frappe.client.get_value` | `{ doctype: 'Bunch QR Code', filters: { name: bunchId }, fieldname: ['bunch_size', 'stem_length', 'item_code'] }` | `api.ts:467` (`getBunchInfo`) |
+| `upande_harvest.api.get_grader_open_bucket` | `{ grader }` | `api.ts:955` |
+| `mobile_grading_entry` | `{ bunch_id, grader, bucket_id, farm, bunch_size?, stem_length?, qty?, variety?, posting_date?, posting_time? }` | `api.ts:446` |
+
+`get_grader_open_bucket` returns `{ open, receiving_out, bucket_id, variety, initial_qty, remaining_qty, opened_at }` and `open: false` when the grader holds no open Receiving Out. In the grading flow that is an error state, not a no-op (`api.ts:951-953`). Responses unwrap as `res.message ?? res`.
+
+**`bunch_size` and `stem_length` are read off the ERP `Bunch QR Code` record** (`api.ts:465-466`). There is therefore **no client-side `item_group` derivation and no lockout window**. Any `Grader3` / `SPRAY` substring / 100-second lockout / `DATE_SUB` vs `add_to_date` UTC-vs-EAT note is **Kikwetu's and has been deleted from this plan.** Do not reintroduce it.
+
+**Out of scope:** sqlite, the sync queue, the stem pool (`addToPool` / `gradeFromPool` / `getPoolStatus`), bouquet grading, bucket balance, rejects.
+
+### 8.3 Packing — unblocked
+
+Xflora's own contract. `api.ts:579-615`:
+
+| Endpoint | Payload |
+|---|---|
+| `list_open_opls_for_packing` | `{ from_date?, to_date? }` |
+| `get_packable_varieties` | `{}` |
+| `create_boxes_for_opl` | `{ opl }` |
+| `get_open_box_for_opl` | `{ opl }` |
+| `add_bunch_to_box` | `{ bunch_id, box_id?, opl?, farm? }` |
+| `close_pack_box` | `{ box_name }` |
+| `pack_bunch_to_opl` | `{ opl, bunch_id }` |
+
+**Deleted from this plan as not existing on Xflora:** `get_pick_list_with_farm_pack_list`, `createOrUpdateFarmPackList`, `fetchPicklists`, `fetchStockEntryByBunch`, and the `Farm Pack List` doctype. Those are Karen's Farm Pack List flow. The ten client-side validations and the `data`-not-`message` envelope quirk went with them.
+
+Use packhouse's `PackingScreen.tsx` for layout and component structure only.
+
+#### Rule 1 — pack rate cap
+
+**Scope: Xflora packs straight single-variety boxes.** Mix boxes are a later phase — see "Mix boxes" below. Rule 1 is the correct cap for every box in Phase 6 scope.
+
+`pack_rate` comes from the Sales Order via the OPL. It is returned by `get_open_box_for_opl` (`OpenBoxResponse.pack_rate`, `types/index.ts:373`) and by `list_open_opls_for_packing` (`PackableOpl.pack_rate`, `types/index.ts:382`). A third endpoint, `get_pack_box_recipe`, also carries it (`PackBoxRecipe.pack_rate`, `api.ts:649`), but is not needed in Phase 6 — again, see "Mix boxes".
+
+**`pack_rate` is expressed in STEMS, not bunches.** A box at `pack_rate` 250 holds 25 bunches only if every bunch is size 10, and `bunch_size` is per `Bunch QR Code` record. **Do not implement a bunch-count cap.** Track a running stem total.
+
+The test is whether the **incoming** bunch overshoots:
 
 ```
-src/app/(app)/kikwetu/grading.tsx            424 lines
-src/app/(app)/kikwetu/packing.tsx            573 lines
-src/features/grading/useCreateGradingEntry.ts
-src/features/grading/useBunchSizeOptions.ts
-src/features/packing/useCreateOrUpdateFarmPackList.ts
-src/features/packing/useFetchPickListWithFarmPackList.ts
-src/types/grading.ts
-src/types/packing.ts
+stemsInBox + incomingBunchSize > pack_rate   → reject the scan
 ```
 
-Bring them over with `git checkout origin/kikwetu -- <path>` per file, land them at `src/app/(app)/grading.tsx` and `src/app/(app)/packing.tsx` (no `kikwetu/` segment), then restyle to `<Screen>` + `<Card>` like Phase 3.
+The legacy app gets this wrong twice, and both are defects to fix rather than behaviour to copy:
 
-**The port is UI-cheap and backend-expensive.** The screens carry Kikwetu's business rules, which are not Xflora's:
+1. **Off by one bunch.** `PackingScreen.tsx:199` tests `stemsInBox >= session.pack_rate` — it admits a bunch that overshoots, and only refuses the one *after*. A box at 245/250 accepts a size-10 bunch and lands at 255.
+2. **Offline-only.** That check sits inside an `if (!isConnected)` branch. **Online scans have no client-side cap at all** — the online path posts and then merely *reports* the result (`PackingScreen.tsx:246`: `show('success', 'Box full — …')`, a success toast).
 
-- **Grading** — Kikwetu is per-bunch QR against the `Grader3` server script, which derives `bunch_size` from the variety's `item_group` (case-insensitive `SPRAY` substring → 5, else 10) and enforces a 100-second `Bunch QR Code` lockout. It also carries the timezone fix: the window must be computed with `frappe.utils.add_to_date(frappe.utils.now_datetime(), seconds=-100)`, **not** SQL `DATE_SUB(NOW(), …)` — MariaDB's `NOW()` is UTC while Frappe stores local (EAT), so the SQL form never expires. Xflora already has a `get_grading_stats` script feeding the Graded dashboard tile, so grading data exists on that instance — the open question is which doctype writes it and whether the QR contract is the same.
-- **Packing** — Kikwetu scans an OPL QR (URL form, last path segment is the ID), loads via `get_pick_list_with_farm_pack_list` (response under `data`, **not** `message`), applies ten client-side validations, and submits a batch to `createOrUpdateFarmPackList`. Xflora needs to actually have `Farm Pack List` and those two endpoints.
+#### Mix boxes — deliberately deferred, not missing
 
-**Gate on this before writing any Grading/Packing code:** confirm on `xflora.upande.com` whether (a) the grading QR contract and target doctype match Kikwetu's, and (b) `get_pick_list_with_farm_pack_list` / `createOrUpdateFarmPackList` / `Farm Pack List` exist. If either is absent, the phase is a backend build with a UI port on top, not a UI port — size it accordingly.
+Xflora packs single-variety boxes. Mix is a later phase and is **out of Phase 6 scope by decision**, not by oversight. The machinery exists in the contract and is named here so nobody rediscovers it as a gap:
 
-`drawerItems.ts` already has both stubbed as v2 candidates; uncomment and point at the new routes. Decide whether either earns a slot on the five-tab bar in `(app)/_layout.tsx` or stays drawer-only with `href: null`.
+| Symbol | Location | Status |
+|---|---|---|
+| `PackableOpl.is_mix` | `types/index.ts:383` | present, unused in Phase 6 |
+| `PackBoxRecipe.is_mix_box` | `api.ts:652` | present, unused in Phase 6 |
+| `PackBoxRecipe.recipe: MixRecipeItem[]` | `api.ts:653` | present, unused in Phase 6 |
+| `MixRecipeItem` — `{ item_code, item_name, target_stems, packed_stems, remaining, done }` | `api.ts:636-643` | present, unused in Phase 6 |
+| `get_pack_box_recipe` | `api.ts:657` | **not called in Phase 6** |
+
+**Requirement:** if `list_open_opls_for_packing` returns OPLs with `is_mix: true`, **filter them out of the picker.** The payload accepts only `{ from_date?, to_date? }`, so there is no server-side filter to ask for — this is a client-side exclusion. A mix OPL that can be selected will fail somewhere deeper in the flow, where the error is far harder to read than "not offered".
+
+**Consequence for whenever mix does land: Rule 1 gets rewritten, not extended.** A mix box's cap is not one stem total against one `pack_rate` — `MixRecipeItem` carries `target_stems` / `packed_stems` / `remaining` **per `item_code`**, so the cap becomes per-recipe-line, and the admission test becomes "does this bunch's variety have a line with room" rather than "is there room in the box". A single running total cannot express that. Recording it now so nobody tries to bolt mix onto Rule 1 later.
+
+#### Rule 2 — graded validation at scan time
+
+An ungraded bunch must be rejected **the moment it is scanned**, not at `close_pack_box`. Deferring it to close means a packer discovers the bad bunch after the box is physically packed. Current behaviour is the defect being fixed.
+
+#### Backend implication — record, do not design around
+
+Both rules are most likely **server-side changes to `add_bunch_to_box`**, which today appears to accept both overfill and ungraded bunches.
+
+**Client-side enforcement alone is not sufficient.** Two scans landing concurrently can both read the same stem total and both pass a client check, and the box overfills anyway. The robust shape is **atomic rejection inside `add_bunch_to_box`**, with the client mirroring the rule purely for instant feedback.
+
+#### BLOCKING QUESTIONS for the backend owner
+
+- **(a)** Does `add_bunch_to_box` reject a bunch that would exceed `pack_rate`, or does it accept and merely flag? *Evidence it does not reject:* the legacy online path treats a full box as a success (`PackingScreen.tsx:246`), which implies the server accepted the overshooting bunch and reported `full: true` afterwards.
+- **(b)** Does it reject an ungraded bunch, or is that check only in `close_pack_box`?
+- **(c)** Does its response return `stems_count` and the bunch's own stem contribution, so the client can render `N/250` without a second round trip? **Largely already answered — needs confirmation, not discovery.** `AddBunchResponse` (`types/index.ts:314-324`) already declares `stems` (this bunch's contribution), `stems_count`, `pack_rate`, `remaining`, and `full`; `PackBunchToOplResponse` (`types/index.ts:401-417`) declares the same set plus `bunch.bunch_size`. So the question narrows to whether those fields are populated and authoritative post-write.
+
+Serialization for `add_bunch_to_box` / `pack_bunch_to_opl` is unresolved — see §8.1, where these rules sharpen it considerably.
+
+### 8.4 Dispatch — BLOCKED
+
+No endpoints on Xflora. Placeholder only.
+
+`fetchDispatchTrucks` and `createDispatchEntry` are **Karen-only**. Xflora's dispatch contract is **undefined** — not "the same as Karen's", not "probably like packing". **Do not design against packhouse's dispatch flow;** doing so would bake Karen's model into Xflora before the backend has an opinion. Revisit when endpoints exist.
+
+### 8.5 Navigation
+
+`drawerItems.ts` has Grading and Packing stubbed as v2 candidates; uncomment and point at `/grading` and `/packing`. Decide whether either earns a slot on the five-tab bar in `(app)/_layout.tsx` or stays drawer-only with `href: null`. Both are tab-or-drawer destinations, so neither takes `onBack` (§5).
 
 ## 9. Phase 7 — ship
 
@@ -170,4 +284,6 @@ Verify on a preview-channel device, then promote to `production`. No new APK nee
 
 ## Sequencing note
 
-Phases 1–5 are self-contained and shippable on their own. Phase 6 depends on backend answers that don't exist yet. Ship the restyle first rather than holding it behind Grading and Packing.
+Phases 1–5 are self-contained and shippable on their own. Ship the restyle first rather than holding it behind Grading and Packing.
+
+Phase 6 is no longer backend-blocked: Grading and Packing are unblocked and can be built once Phase 5 lands. **Grading is clear to start first** — it has no open questions. **Packing has three blocking questions (§8.3) plus the serialization decision that follows from them (§8.1)**, all needing the backend owner. Dispatch stays blocked indefinitely on §8.4.
