@@ -150,7 +150,7 @@ All done except the harness removal at the bottom. Two corrections to what this 
 
 ## 8. Phase 6 — Grading and Packing
 
-**Backend status on `xflora.upande.com`:** **Grading is built** (§8.2). **Packing is fully unblocked** — contract, payload, cap source and validation rules are all confirmed against the Server Script and live data, and no backend change is required (§8.3). Dispatch has no endpoints and stays blocked (§8.4).
+**Backend status on `xflora.upande.com`:** **Grading is built** (§8.2). **Packing's contract is fully confirmed, but the endpoint has two live defects that block shipping** — it corrupts its own summary fields on every write, and a production `item_code`/`uom` convention mismatch silently mis-warehouses scans (§8.3). The screen can be built; it cannot ship until both are fixed server-side. Dispatch is unscoped rather than blocked (§8.4).
 
 ### 8.0 Source split — read this first
 
@@ -302,7 +302,7 @@ There is also a **self-heal path** in the script for bunch numbers `20099–2082
 - **QR routing is type-aware.** `detectGradingQrType` ports the legacy JSON-key and string-prefix detection, so a badge scanned into the bunch field re-latches the grader instead of being submitted as a bunch. Bucket-type QRs are rejected with the Direct-to-Grader message, as in the reference.
 - **Writes are serialized** through `serializeByKey('grading', …)` — §8.1. Lives in `lib/serializeByKey.ts`, not `lib/api.ts` (constraint 3).
 
-### 8.3 Packing — contract confirmed, UNBLOCKED, not yet built
+### 8.3 Packing — contract confirmed; 🔴 BLOCKED on two live backend defects
 
 **Everything this section previously said about packing was wrong.** It was derived from `/tmp/xflora-legacy`, which points at a different site (§8.0).
 
@@ -348,6 +348,62 @@ Note the reversal: §8.3 previously deleted `createOrUpdateFarmPackList` as "Kar
 **Every error is double-wrapped.** The script's outer handler is `except Exception as e: frappe.throw(_("Error processing packing: ") + str(e))`, and `frappe.throw` is how its own validations fire — so they get caught and re-thrown with the prefix. A Rule-2 rejection reaches the client as `Error processing packing: Bunch BUNCH-123 has not been graded in the system…`. **Match on substrings, never on equality.**
 
 `custom_farm` is assigned to a local (`user_farm`) and then never read. **Send it — it is not merely harmless, it is the value `Box Label.farm` needs**, and the fix for that is on the server side of the same wire (see the Box Label section). It does not affect the write today. On the create path neither customer nor farm is set on the Farm Pack List itself.
+
+#### 🔴 CRITICAL — the endpoint corrupts its own summary fields. VERIFIED ON LIVE DATA.
+
+**This is the highest-severity item in §8.3 and it is a hard gate on shipping packing.** It outranks the Box Label field gaps: those make labels incomplete, this makes stored data wrong.
+
+`FPL-2026-00017` reports `total_stems` **64,000** and `packed` **8000.0%** for a real session of 80 × `Bunch(10)` = **800 stems**. The OPL is correct (`custom_total_stems` `"800"`), so the corruption is entirely inside `createOrUpdateFarmPackList`.
+
+**Bug 1 — create branch inflates by N² × 10**, where N is the number of bunches in one submission. Four independent confirmations:
+
+| FPL | N | N² × 10 | Reported |
+|---|---|---|---|
+| `FPL-2026-00017` | 80 | 64,000 | 64,000 ✓ *(hand-verified)* |
+| `FPL-2026-00015` | 28 | 7,840 | 7,840 ✓ |
+| `FPL-2026-00014` | 50 | 25,000 | 25,000 ✓ |
+| `FPL-2026-00006` | 40 | 16,000 | 16,000 ✓ |
+
+And `64000 / 800 × 100 = 8000.0%`, matching the reported `packed` exactly.
+
+**Mechanism.** The create branch passes `aggregated_items` to `set_summary_fields`. Grouping has accumulated **both** members of the pair:
+
+```python
+grouped_items[key]["bunch_qty"]              += item["bunch_qty"]              # → N
+grouped_items[key]["custom_number_of_stems"] += item["custom_number_of_stems"] # → N × 10
+```
+
+`custom_number_of_stems` is a **per-bunch constant** (10 for `Bunch(10)`) and must not accumulate. `set_summary_fields` then multiplies the two — `bunch_qty × custom_number_of_stems` = `N × 10N` = **N² × 10**.
+
+The update branch passes ungrouped `processed_items` (each `1 × 10`), so it does not inflate — which is why `FPL-2026-00016` is correct at 140.
+
+**Bug 2 — update branch ASSIGNS instead of accumulating.** `set_summary_fields` sets `total_stems` from the current call's items only, discarding everything packed previously. An FPL updated with a single bunch reports **10 stems** regardless of history — see `FPL-2026-00013`, `00011`, `00003`, all exactly 10.
+
+**Recommended fix: stop deriving summaries from the request payload.** After the appends, sum over the document's own rows:
+
+```python
+total = 0
+for row in doc.pack_list_item:
+    stems_per_bunch = int(row.bunch_uom.split("(")[1].split(")")[0])
+    total += (row.bunch_qty or 0) * stems_per_bunch
+```
+
+Cumulative and correct in **both** branches, and immune to how the payload happens to be grouped. **The same substitution fixes `sync_box_label`**, which is handed the identical inflated `(bunch_qty, custom_number_of_stems)` pair.
+
+**⚠️ What our own client design does to this.** One-bunch-per-scan (Rule 2's fix) means N = 1 on every request, which changes the exposure rather than removing it:
+
+| | Effect at N = 1 |
+|---|---|
+| Bug 1 (N² inflation) | **Avoided entirely** — `1² × 10 = 10` is correct |
+| Bug 2 (assign not accumulate) | **Fully hit** — `total_stems` is overwritten with `10` on every scan and permanently reads 10 |
+| `pack_list_item` row data | **Correct** — `bunch_qty` accumulates via the matched-row increment |
+| `Box Label.box_item.qty` | **Correct** — `+= 1 × 10` per scan accumulates properly |
+
+So a session driven by this client produces **accurate row detail and accurate Box Label quantities, with summary fields stuck at one bunch** (`total_stems` 10, `packed` ~1%). Under-reporting rather than inflation — still corrupt, still not shippable, but worth knowing because it is a different symptom than the historical records show, and post-fix verification should check both shapes.
+
+**Blast radius.** Every FPL and Box Label created through this endpoint since February carries wrong summaries; **16 FPLs exist.** Historical data needs a backfill decision separately from the code fix — the recommended fix corrects future writes but does not recompute existing documents.
+
+> **Provenance note (§8.0):** the four N² matches are independent live confirmation that `set_summary_fields` is unchanged from the snapshot body. That materially raises confidence in the rest of the snapshot-sourced reading of this script — including Rule 2's throw and Rule 3's warehouse fallback, both still tagged 🟡 but now corroborated by the fact that a different function in the same script behaves live exactly as the snapshot says.
 
 #### Rule 2 — graded validation is ALREADY server-side. No backend work.
 
@@ -470,6 +526,8 @@ Both fields are **strings** on `Pick List Item` — parse before dividing, or `"
 
 **Render "Box N of M", and refuse scans past M.** The server has no cap, no box count, and no `box_id` value meaning "invalid", so past box `M` the client is the only thing that can stop a scan.
 
+**⛔ NEVER read `total_stems` back from the server as the running total.** The client must maintain its own, computed from each scanned bunch's `bunch_uom`. This is not a preference or a round-trip optimisation — **`total_stems` is actively wrong on live data**: inflated by N² × 10 on the create branch, and overwritten with only the current call's stems on the update branch. See the CRITICAL section above. A client that trusted it would show `8000%` packed on one OPL and `1%` on another, both for correctly packed boxes.
+
 #### ⚠️ `qty` on `Pick List Item` is BUNCHES, and can be FRACTIONAL
 
 Not stems. And not whole:
@@ -506,11 +564,41 @@ accept only if some row in item_locations satisfies
 AND row.custom_stem_length  === bunch.stem_length
 ```
 
-That is the same pair the server matches on, so a client-side pass predicts a server-side match and the fallback never fires. `uom` is the third dimension the server checks, but it is constant per OPL — see below.
+That is the same pair the server matches on, so a client-side pass predicts a server-side match and the fallback never fires. `uom` is the third dimension the server checks.
 
-Note this makes Rule 3 a **membership test against the OPL's rows**, not a comparison against one scalar. The variety is fixed per OPL, so in practice it reduces to "is this bunch's length one of the lengths this OPL wants" — but express it as the two-field match, because that is what the server does and it stays correct if a multi-variety OPL ever appears.
+Note this makes Rule 3 a **membership test against the OPL's rows**, not a comparison against one scalar — which is what keeps it correct for a mixed-variety OPL as well.
 
 This ranks with Rule 2, not with Rule 1. Rule 1 prevents an overfull box, which is visible and recoverable. Rule 3 prevents silent stock misallocation, which is neither.
+
+#### 🔴 Rule 3 CANNOT be a strict string match yet — the mismatch is CONFIRMED FIRING on live data
+
+**`OPL-2026-02906` holds `item_code` `"Athena"` while its Box Label row reads `"Athena-35CM"`, and its `uom` is `"Stems"`, not `"Bunch(10)"`.** Two of the server's three match dimensions fail, so **every scan on that OPL fell back to `item_locations[0].warehouse` silently.** This is no longer a hypothesis about a convention inconsistency — it has already happened, in production, undetected.
+
+Implemented as strict equality, Rule 3 would **reject every scan** on such an OPL: the bunch's `item_code` (`Athena-35CM`, matching the Box Label form) never equals the OPL's (`Athena`). That converts a silent-corruption bug into a total block, which is safer but unusable.
+
+So Rule 3 is correct in intent and **not yet implementable as specified.** One of these has to happen first, and it is a data/backend decision, not a client one:
+
+1. **Reconcile the `item_code` convention** so OPL rows and `Bunch QR Code` rows agree. Cleanest, and it fixes the warehouse resolution for everyone, not just this client.
+2. **Define the relationship explicitly** — e.g. OPL `item_code` is the variety stem and the bunch's is `<variety>-<length>` — and have the client match on the documented derivation rather than equality. Fragile: it re-introduces exactly the "parse a length out of `item_code`" pattern this plan already warns against.
+
+Until one lands, **the client cannot distinguish "wrong variety" from "convention mismatch"**, and any rejection it raises may be a false positive. Do not ship Rule 3 as a hard block against live OPLs before this is settled — and note that not shipping it leaves the silent-misallocation path open, which is why this belongs on the same gate as the summary-field corruption above.
+
+#### ✅ RESOLVED — a `Stems`-uom OPL does NOT break the paren parse
+
+Correcting an earlier claim of mine, which rested on a wrong premise. §8.3 previously recorded that a `Stems`-uom OPL "cannot be packed through this endpoint" because `bunch_uom.split("(")[1]` would throw on `"Stems"`.
+
+**That is wrong. The parse operates on the *payload's* `bunch_uom`, not the OPL's `uom`:**
+
+```python
+bunch_uom = entry.get("bunch_uom")          # from items[] — i.e. Bunch QR Code
+number_of_stems = int(bunch_uom.split("(")[1].split(")")[0])
+```
+
+Since the client always sends `Bunch(N)` from the `Bunch QR Code` record, the parse always succeeds regardless of what the OPL says. `OPL-2026-02906` is the proof: uom `Stems`, and it packed.
+
+**The real consequence is narrower and worse.** The OPL's `uom` is used only in the three-way warehouse match, so a `Stems`-uom OPL **always fails that match and always takes the fallback warehouse** — silently, on every scan, forever. It is not un-packable; it is un-*correctly*-packable.
+
+This folds into Rule 3's blocker above rather than being a separate question: both are the same failure, reached through different dimensions of the same match.
 
 #### `bunch_uom` comes from the bunch, never from the order
 
@@ -528,15 +616,17 @@ All 15 rows of `OPL-2026-02914` are `Bunch(10)`; all 10 rows of `OPL-2026-02172`
 
 Two things follow:
 
-**1. The residual `uom`-format risk is resolved.** §8.0 previously flagged, as unverified, whether OPL `item_locations.uom` used the same `Bunch(N)` form as `Bunch QR Code.bunch_size`. **It does.** So the third dimension of the server's warehouse match lines up, and Rule 3's two-field check is sufficient — the fallback will not fire on a correct scan for UOM reasons.
+**1. The `uom` format agrees — but NOT universally.** §8.0 flagged as unverified whether OPL `item_locations.uom` used the same `Bunch(N)` form as `Bunch QR Code.bunch_size`. On these two OPLs it does. **But `OPL-2026-02906` has `uom` `"Stems"`**, so the agreement is a property of *some* OPLs, not of the field. Partially resolved only: a `Bunch(N)`-uom OPL will match cleanly; a `Stems`-uom one never will (see the Rule 3 blocker above).
 
-**2. The wrong-size gap is now closable, and should be closed.** Previously this was left open because `custom_bunching`'s semantics were unconfirmed. That is no longer the obstacle: `item_locations[0].uom` states the OPL's required size in exactly the format the bunch record uses, so the check is a direct string comparison with no interpretation:
+**2. The wrong-size gap is closable *on OPLs whose uom is in `Bunch(N)` form*.** Previously left open because `custom_bunching`'s semantics were unconfirmed; that is no longer the obstacle, since `item_locations[0].uom` states the required size in the same format the bunch record uses:
 
 ```
 reject when bunch.bunch_size !== opl.item_locations[0].uom
 ```
 
-Worth doing, because nothing else catches it. A `Bunch(5)` in a `Bunch(10)` OPL passes Rule 3 (same variety, same length), and Rule 1 just counts 5 stems instead of 10 — so the box hits its stem cap holding the wrong number of bunches, and the discrepancy is invisible in both the response and the Farm Pack List. **Recommend adopting this as part of Rule 3** rather than a separate rule: it is the same "does this bunch belong in this OPL" question, on the third dimension the server already matches.
+Worth doing, because nothing else catches it. A `Bunch(5)` in a `Bunch(10)` OPL passes Rule 3's variety-and-length check, and Rule 1 just counts 5 stems instead of 10 — so the box hits its stem cap holding the wrong number of bunches, and the discrepancy is invisible in both the response and the Farm Pack List. **Recommend adopting this as part of Rule 3**: same "does this bunch belong in this OPL" question, third dimension of the same match.
+
+**Guard it against the `Stems` case**, though — applied naively, this comparison rejects every scan on a `Stems`-uom OPL, since `"Bunch(10)" !== "Stems"`. That is the same blocker as Rule 3's, reached through the third dimension: the check is correct, and it cannot be enabled until OPL uom data is consistent.
 
 `custom_bunching` (`X10`) is then only a human-readable echo on the Sales Order. Its semantics remain unconfirmed but no longer matter to the client.
 
@@ -550,7 +640,9 @@ Internally the Farm Pack List stores the box number in a field named `bucket_id`
 
 #### 🔧 Box Label — the printable deliverable. ALL BACKEND WORK.
 
-> **SCOPE: none of this is client work.** Every item here is a change to `sync_box_label` inside the `createOrUpdateFarmPackList` Server Script. **Recorded, not to be attempted from this repo** — it needs Frappe site access and belongs to whoever owns the script. The packing screen can be built and shipped against the contract as it stands; labels will simply render incomplete until this lands.
+> **SCOPE: none of this is client work.** Every item here is a change to `sync_box_label` inside the `createOrUpdateFarmPackList` Server Script. **Recorded, not to be attempted from this repo** — it needs Frappe site access and belongs to whoever owns the script.
+>
+> **Corrected:** this previously said the packing screen "can be built and shipped against the contract as it stands." **It cannot** — the same script corrupts its summary fields on every write (see the CRITICAL section), and `sync_box_label` receives the same inflated `(bunch_qty, custom_number_of_stems)` pair. Box Label quantities are wrong for the same reason and by the same fix. **Building the screen is fine; shipping it is gated on the script fix.**
 
 The `Box Label` print format is **Jinja with `raw_printing = 0`**, so the deliverable is a **rendered PDF attachment**, not an ESC/POS byte stream to a thermal printer. That matters for the client eventually — a PDF is fetched and shared/printed via the OS, not written to a socket — but nothing about it is blocked on the v1.1 Bluetooth printing work.
 
@@ -663,10 +755,12 @@ Rule 3 is already correct for this case: it is expressed as a membership test ov
 #### Residual risks to watch when building
 
 - **Check against a LIVE OPL, not a snapshot one.** OPL ids in this plan are illustrative (§8.0) — the snapshot tops out at `OPL-2026-00900` while live is past `OPL-2026-02904`. Anything below only means something when re-read from the live site.
-- **⛔ OPEN — what gets scanned into a `Stems`-uom OPL?** `OPL-2026-02921` has uom `Stems`, not `Bunch(N)`. The script's `bunch_uom.split("(")[1]` raises `IndexError` on that, throwing `Invalid bunch size format for UOM 'Stems'` — so **such an OPL cannot be packed through this endpoint using its own uom.** Either these are packed some other way, or their bunches carry a `Bunch(N)` of their own regardless of the OPL's uom, or they are not meant to reach this screen at all.
-- **⛔ OPEN — box closure has no trigger.** Nothing signals that a box is complete, so there is no event on which to render the Box Label PDF. Backend affordance required; see the Box Label section. Gates the printable deliverable, not the packing writes.
-- **The OPL picker has two exclusion criteria to settle before it is built**, both above: `Stems`-uom OPLs (cannot be packed at all as-is) and `custom_is_mixed_box_pick_list = 1` OPLs (deferred by choice). Offering either one means a packer hits a failure the screen never explains. Decide exclude-vs-mark for each.
-- **The silent warehouse fallback is Rule 3, not a watch item.** Promoted — see Rule 3. The `uom` half of this risk is **resolved**: `item_locations[*].uom` does use the same `Bunch(N)` form as `Bunch QR Code.bunch_size`, so a correct scan will not trip the fallback on a UOM mismatch.
+- **🔴 BLOCKING — summary-field corruption.** `total_stems` / `packed` are wrong on every write, verified live. Highest-severity item in this section; see the CRITICAL block. **Packing must not ship against the endpoint until this is fixed.**
+- **🔴 BLOCKING — the `item_code` / `uom` convention mismatch is firing in production.** `OPL-2026-02906` (`item_code` `Athena` vs bunch `Athena-35CM`, uom `Stems`) fails two of three match dimensions on every scan and silently takes the fallback warehouse. Rule 3 cannot ship as a strict match until OPL and `Bunch QR Code` conventions are reconciled — and not shipping it leaves the silent-misallocation path open. See the Rule 3 blocker.
+- **⛔ OPEN — box closure has no trigger.** Nothing signals that a box is complete, so there is no event on which to render the Box Label PDF. Backend affordance required; see the Box Label section. Gates the printable deliverable specifically.
+- ~~**OPEN — what gets scanned into a `Stems`-uom OPL?**~~ **RESOLVED** — the paren parse reads the *payload's* `bunch_uom` (always `Bunch(N)` from the bunch record), not the OPL's, so such an OPL packs without throwing. It simply never matches a warehouse. Folded into the Rule 3 blocker above.
+- **The OPL picker has exclusion criteria to settle before it is built:** `custom_is_mixed_box_pick_list = 1` OPLs (deferred by choice), and — until the convention mismatch is fixed — OPLs whose `item_code`/`uom` cannot match their bunches, which will silently mis-warehouse everything scanned into them. Decide exclude-vs-mark for each.
+- **The silent warehouse fallback is Rule 3, not a watch item.** Promoted — see Rule 3. The `uom` half is **only partially** resolved: two sampled OPLs use `Bunch(N)`, but `OPL-2026-02906` uses `Stems`, so format agreement is a property of some OPLs rather than of the field.
 - **The doctype is spelled `Order Pick LIst`** — capital `I`. That typo is the actual doctype name; any direct query must reproduce it.
 - The OPL must have `item_locations`, or the call throws `Order Pick List has no location entries defined`.
 - The Farm Pack List is `submit()`ed on creation and thereafter updated with `ignore_validate_update_after_submit`, with `status` forced to `Completed` on every write. Expect no draft state.
@@ -703,12 +797,16 @@ Verify on a preview-channel device, then promote to `production`. No new APK nee
 
 Phases 1–5 are self-contained and shippable on their own. Ship the restyle first rather than holding it behind Grading and Packing.
 
-**Grading is built** (§8.2). **Packing is unblocked and needs no backend change** (§8.3) — every parameter comes off the OPL's own `Pick List Item` rows in one fetch: `custom_packrate` for the per-box cap, `custom_total_stems / custom_packrate` for the box count, `item_locations[0].uom` for the bunch size. Three client-side rules are correctness requirements before it ships: Rule 2's one-bunch-per-scan so a rejection blames the right bunch, **Rule 3's two-field variety-and-length match plus the bunch-size check, so no bunch can silently land in the wrong warehouse or against the wrong row**, and Rule 1's stem cap with the "Box N of M" bound.
+**Grading is built** (§8.2). **Packing's contract is fully mapped** (§8.3) — every parameter comes off the OPL's own `Pick List Item` rows in one fetch: `custom_packrate` for the per-box cap, `custom_total_stems / custom_packrate` for the box count, `item_locations[0].uom` for the bunch size. Three client-side rules are correctness requirements: Rule 2's one-bunch-per-scan so a rejection blames the right bunch, **Rule 3's two-field variety-and-length match plus the bunch-size check**, and Rule 1's stem cap with the "Box N of M" bound.
 
-**Two open questions remain, and neither blocks the packing writes:**
+**🔴 Packing is BLOCKED on two live backend defects. Corrected — an earlier version of this note said the Box Label backlog "does not block packing writes." The writes are themselves corrupt.**
 
-1. **The OPL picker's exclusions** — `Stems`-uom OPLs cannot be packed through this endpoint at all, and mixed-box OPLs (`custom_is_mixed_box_pick_list = 1`) are deferred by choice. Both need an exclude-or-mark decision before the picker is built.
-2. **Box Label output is a separate, backend-side workstream** (§8.3) — six fields the print format renders but `sync_box_label` never sets, a header `length` field that cannot describe a real box, a missing day code that KEPHIS requires, and **no closure trigger to render the PDF on**. All of it is Server Script work needing Frappe site access, not client work. **The packing screen can ship without it**; labels simply render incomplete until it lands, and the day-code omission in particular is recorded so that shipping without it is a decision rather than a surprise at inspection.
+1. **`createOrUpdateFarmPackList` corrupts its own summary fields on every write** — verified live: `total_stems` inflated N² × 10 on create, overwritten with one call's stems on update. **16 FPLs already carry wrong totals**, and every Box Label created since February inherits the same bad pair. One fix in `set_summary_fields` corrects both. **Packing must not ship until it lands**; a historical backfill is a separate decision. §8.3, CRITICAL block.
+2. **The `item_code` / `uom` convention mismatch is firing in production** — `OPL-2026-02906` fails two of three warehouse-match dimensions and silently mis-warehouses every scan. Rule 3 cannot be enabled as a strict match until OPL and `Bunch QR Code` conventions are reconciled, and leaving it off keeps the silent path open.
+
+Both are Server Script / data work needing Frappe site access, **not client work.** The screen can be built against the contract meanwhile — the contract itself is settled — but it cannot ship.
+
+**Still open, lower severity:** the OPL picker's exclusion criteria (mixed-box OPLs, and any OPL whose convention mismatch cannot be reconciled), and the Box Label output workstream — six unset fields, a header `length` that cannot describe a real box, a **missing day code KEPHIS requires**, and **no closure trigger to render the PDF on**. The day-code omission in particular is recorded so that shipping without it is a decision rather than a surprise at inspection.
 
 **Confidence is split, and the split matters** (§8.0): endpoint *existence* is confirmed live, but every script *body* comes from a bench snapshot ~27 July 2026. Three snapshot-sourced behaviours carry the correctness rules and are tagged 🟡 at their use sites. They cost three deliberate scans to confirm — a successful pack, an ungraded bunch, a wrong-variety bunch — and that should happen on the first live packing session rather than after it.
 
