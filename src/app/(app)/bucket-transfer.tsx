@@ -1,15 +1,5 @@
 import { useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { ArrowDown, QrCode } from 'lucide-react-native';
 
 import { useXfloraBucketTransfer } from '../../features/bucket-transfer/useXfloraBucketTransfer';
@@ -17,14 +7,14 @@ import { playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
 import { extractFrappeError } from '../../lib/api';
 import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOverlay';
-import { AppBar } from '../../components/ui/AppBar';
+import { Card, Notice, type NoticeTone } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
-import { Pill } from '../../components/ui/Pill';
+import { Screen } from '../../components/ui/Screen';
 import { colors, radii, spacing } from '../../components/ui/theme';
 
 const ACCENT = colors.accent;
 
-type FeedbackMsg = { type: 'success' | 'warning' | 'error'; text: string };
+type FeedbackMsg = { tone: NoticeTone; text: string };
 type ScanTarget = 'source' | 'destination';
 
 function isValidJson(text: string): boolean {
@@ -52,7 +42,6 @@ function extractBucketId(raw: string): string | null {
 }
 
 export default function BucketTransferScreen() {
-  const router = useRouter();
   const transfer = useXfloraBucketTransfer();
 
   const [sourceId, setSourceIdState] = useState('');
@@ -92,7 +81,7 @@ export default function BucketTransferScreen() {
   }
 
   function warn(text: string) {
-    setFeedback({ type: 'warning', text });
+    setFeedback({ tone: 'warn', text });
     playError();
     haptics.medium();
   }
@@ -118,11 +107,11 @@ export default function BucketTransferScreen() {
         destinationBucketId: dst,
       });
       playSubmit();
-      setFeedback({ type: 'success', text: res.message });
+      setFeedback({ tone: 'success', text: res.message });
     } catch (e) {
       playError();
       haptics.medium();
-      setFeedback({ type: 'error', text: extractFrappeError(e) });
+      setFeedback({ tone: 'danger', text: extractFrappeError(e) });
     } finally {
       resetForm();
       setLoading(false);
@@ -172,16 +161,9 @@ export default function BucketTransferScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.root}>
-      <AppBar title="Bucket Transfer" onBack={() => router.back()} />
-
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
+    <Screen title="Bucket Transfer">
+      <Card title="Transfer bucket">
         <View style={styles.form}>
-          {/* Source */}
           <Field label="Source Bucket">
             <View style={styles.scanRow}>
               <TextInput
@@ -205,7 +187,6 @@ export default function BucketTransferScreen() {
             <ArrowDown size={28} color={colors.muted} />
           </View>
 
-          {/* Destination */}
           <Field label="Destination Bucket">
             <View style={styles.scanRow}>
               <TextInput
@@ -223,35 +204,32 @@ export default function BucketTransferScreen() {
               </Pressable>
             </View>
           </Field>
-
-          {loading ? (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator size="small" color={ACCENT} />
-              <Text style={styles.hint}>Transferring…</Text>
-            </View>
-          ) : null}
-
-          {feedback ? <Pill variant={feedback.type}>{feedback.text}</Pill> : null}
-
-          <Text style={styles.hint}>
-            Scan the source bucket, then the destination — transfer submits automatically.
-          </Text>
         </View>
-      </ScrollView>
+      </Card>
+
+      {loading ? (
+        <View style={styles.loadingRow}>
+          <ActivityIndicator size="small" color={ACCENT} />
+          <Text style={styles.hint}>Transferring…</Text>
+        </View>
+      ) : null}
+
+      {feedback ? <Notice tone={feedback.tone}>{feedback.text}</Notice> : null}
+
+      <Text style={styles.hint}>
+        Scan the source bucket, then the destination — transfer submits automatically.
+      </Text>
 
       <BarcodeScannerOverlay
         visible={scannerVisible}
         onScan={handleCameraScan}
         onCancel={() => setScannerVisible(false)}
       />
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  scroll: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
   form: { gap: spacing.md },
   input: {
     borderWidth: 1,
@@ -278,6 +256,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
+    marginBottom: spacing.md,
   },
   hint: { fontSize: 13, color: colors.muted, textAlign: 'center' },
 });
