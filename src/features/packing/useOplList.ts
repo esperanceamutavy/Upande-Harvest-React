@@ -82,7 +82,7 @@ async function fetchOplList(range: OplDateFilter): Promise<OplListItem[]> {
     name: String(r.name ?? ''),
     customer: r.customer != null ? String(r.customer) : null,
     salesOrder: r.sales_order != null ? String(r.sales_order) : null,
-    totalStems: r.custom_total_stems != null ? String(r.custom_total_stems) : null,
+    totalUnits: r.custom_total_stems != null ? String(r.custom_total_stems) : null,
     boxType: r.custom_box_type != null ? String(r.custom_box_type) : null,
     dateCreated: r.date_created != null ? String(r.date_created) : null,
   }));

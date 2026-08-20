@@ -590,6 +590,8 @@ capPerBox = parseInt(custom_packrate)                        // "495" → 495
 boxCount  = parseInt(custom_total_stems) / capPerBox         // 1485 / 495 = 3
 ```
 
+Both are in the OPL's **own unit, which is not reliably stems** — see the caveat below. The division is safe because they share it; the labels are not.
+
 `OPL-2026-02914`: `1485 / 495` = **3**. `OPL-2026-02172`: `936 / 312` = **3**.
 
 Both fields are **strings** on `Pick List Item` — parse before dividing, or `"1485" / "495"` silently coerces and `"1485" + …` does not.
@@ -599,6 +601,32 @@ Both fields are **strings** on `Pick List Item` — parse before dividing, or `"
 **Render "Box N of M", and refuse scans past M.** The server has no cap, no box count, and no `box_id` value meaning "invalid", so past box `M` the client is the only thing that can stop a scan.
 
 **⛔ NEVER read `total_stems` back from the server as the running total.** The client must maintain its own, computed from each scanned bunch's `bunch_uom`. This is not a preference or a round-trip optimisation — **`total_stems` is actively wrong on live data**: inflated by N² × 10 on the create branch, and overwritten with only the current call's stems on the update branch. See the CRITICAL section above. A client that trusted it would show `8000%` packed on one OPL and `1%` on another, both for correctly packed boxes.
+
+#### 🔴 `custom_total_stems` IS NOT RELIABLY STEMS. The field name lies.
+
+**`OPL-2026-02953` carries `custom_total_stems` `"8"` for an 80-stem order.** The unit is whatever the allocator happened to write — sometimes stems, sometimes bunches.
+
+**Rule 1's arithmetic still holds.** `custom_packrate` and `custom_total_stems` share whatever unit was used, so `total / cap` is still the correct box count. Nothing about the box maths changes.
+
+**What must change is every label.** Do not call either value "stems" — not in the UI, not in this document. A neutral word ("per box", "order total", or a bare number) is honest on a well-formed OPL and on a broken one alike. Applied in `packing.tsx`: the counter renders `n / cap` with no unit, and the detail rows read `Per box` / `Order total`.
+
+**The distinction that decides which values MAY say "stems":**
+
+| Derived from | Trustworthy? | Labelled |
+|---|---|---|
+| `Bunch QR Code.bunch_size` → `Bunch(10)` → 10 | yes — we parse it ourselves | **"stems"** — the per-bunch increment and the item lines |
+| `Pick List Item.qty × conversion_factor` | yes — both are real per-row numbers | **"stems"** — the item lines |
+| `custom_packrate`, `custom_total_stems` | **no** | unit-neutral |
+
+#### 🔴 BACKEND DEFECT — the allocator appears to ignore `conversion_factor`
+
+`OPL-2026-02953` allocated **8** against a Sales Order line of `qty 8`, `uom Bunch(10)`, `stock_qty 80`. It wrote the bunch count where the stem count belongs, at both the row level and the header total.
+
+**Consequence: every packing session against such an OPL caps out at a tenth of the real order.** `boxCount` comes out ten times too small, so the client refuses scans (correctly, per Rule 1) long before the order is actually packed. The client is behaving correctly on bad data — this cannot be fixed client-side without inventing a heuristic that would corrupt well-formed OPLs.
+
+Note it is **not detectable by cross-checking within the OPL**: on `02953` the row `qty` and the header total are *consistently* scaled down, so `Σ(qty × conversion_factor) == custom_total_stems` holds just as it does on a correct OPL like `02914` (1485 = 14×100 + 85). Catching it would need the Sales Order's `stock_qty`, which the packing screen deliberately does not fetch.
+
+**For the backend owner. Not ours to fix.**
 
 #### ⚠️ `qty` on `Pick List Item` is BUNCHES, and can be FRACTIONAL
 

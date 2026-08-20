@@ -15,9 +15,12 @@ export interface OplRow {
   uom: string;
   warehouse: string | null;
   shelf: string | null;
-  /** Bunches, and CAN BE FRACTIONAL (e.g. 8.5). Never used for box maths. */
+  /** Bunches, and CAN BE FRACTIONAL (e.g. 8.5, 0.8). Never used for box maths. */
   qty: number;
-  /** Stems per box. A string on the wire; identical across an OPL's rows. */
+  /** Stems per bunch for this row's uom, e.g. 10 for `Bunch(10)`. */
+  conversionFactor: number;
+  /** The per-box cap. A string on the wire; identical across an OPL's rows.
+   *  Named "packrate" upstream — see the unit caveat on `totalUnits`. */
   packRate: string | null;
 }
 
@@ -29,7 +32,8 @@ export interface OplListItem {
   name: string;
   customer: string | null;
   salesOrder: string | null;
-  totalStems: string | null;
+  /** `custom_total_stems`. Not reliably stems — see `OrderPickList.totalUnits`. */
+  totalUnits: string | null;
   boxType: string | null;
   dateCreated: string | null;
 }
@@ -42,8 +46,16 @@ export interface OrderPickList {
   /** Null on live documents. The payload's farm comes from the BUNCH instead. */
   farm: string | null;
   boxType: string | null;
-  /** Header field, string on the wire. Numerator of the box count. */
-  totalStems: string | null;
+  /**
+   * `custom_total_stems` — the numerator of the box count. String on the wire.
+   *
+   * ⚠️ THE FIELD NAME LIES. It is NOT reliably stems: `OPL-2026-02953` carries
+   * "8" for an 80-stem order, because the allocator ignores `conversion_factor`
+   * and writes bunches. Rule 1's arithmetic survives (the cap and the total
+   * share whatever unit was used, so `total / cap` is still the box count), but
+   * NEVER label this "stems" in the UI. See RESTYLE_PLAN.md §8.3.
+   */
+  totalUnits: string | null;
   isMixedBox: boolean;
   rows: OplRow[];
 }
@@ -51,7 +63,7 @@ export interface OrderPickList {
 /** Derived session parameters — everything Rules 1 and 3 need, computed once. */
 export interface PackingSession {
   opl: OrderPickList;
-  /** `int(custom_packrate)` — the per-box stem cap. */
+  /** `int(custom_packrate)` — the per-box cap, in the OPL's own unit. */
   capPerBox: number;
   /** `int(custom_total_stems) / capPerBox`, rounded up. The M in "Box N of M". */
   boxCount: number;

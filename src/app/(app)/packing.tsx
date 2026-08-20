@@ -73,8 +73,12 @@ export default function PackingScreen() {
   // total_stems must never be read back (it was corrupt until 2026-08-20 and is
   // a server-side derivation either way).
   const [boxNumber, setBoxNumber] = useState(1);
-  const [stemsInBox, setStemsInBox] = useState(0);
-  const [stemsPacked, setStemsPacked] = useState(0);
+  // "units", not stems: these accumulate in whatever unit the OPL's cap uses.
+  // The per-bunch increment is the bunch's own stem count, which is correct
+  // when the OPL is well-formed and wrong in the same direction as the OPL when
+  // it is not — see the allocator defect in §8.3.
+  const [unitsInBox, setUnitsInBox] = useState(0);
+  const [unitsPacked, setUnitsPacked] = useState(0);
 
   const [entries, setEntries] = useState<PackEntry[]>([]);
   const [feedback, setFeedback] = useState<FeedbackMsg | null>(null);
@@ -130,7 +134,7 @@ export default function PackingScreen() {
       if (!derived) {
         setFeedback({
           tone: 'danger',
-          text: `${opl.name} has no usable pack rate or total stems — box sizes cannot be computed.`,
+          text: `${opl.name} has no usable pack rate or order total — box sizes cannot be computed.`,
         });
         playError();
         return;
@@ -138,8 +142,8 @@ export default function PackingScreen() {
 
       setSession(derived);
       setBoxNumber(1);
-      setStemsInBox(0);
-      setStemsPacked(0);
+      setUnitsInBox(0);
+      setUnitsPacked(0);
       setEntries([]);
       packedIdsRef.current = new Set();
       setBunchProgrammatic('');
@@ -156,8 +160,8 @@ export default function PackingScreen() {
     setSession(null);
     setBunchProgrammatic('');
     setBoxNumber(1);
-    setStemsInBox(0);
-    setStemsPacked(0);
+    setUnitsInBox(0);
+    setUnitsPacked(0);
     setEntries([]);
     packedIdsRef.current = new Set();
     setFeedback(null);
@@ -180,15 +184,15 @@ export default function PackingScreen() {
   }
 
   /** Rule 1 — which box this bunch goes into. Pure; commits nothing. */
-  function planBox(s: PackingSession, stems: number): { boxId: number; stemsAfter: number } | null {
+  function planBox(s: PackingSession, units: number): { boxId: number; unitsAfter: number } | null {
     let boxId = boxNumber;
-    let inBox = stemsInBox;
-    if (inBox + stems > s.capPerBox) {
+    let inBox = unitsInBox;
+    if (inBox + units > s.capPerBox) {
       boxId += 1;
       inBox = 0;
     }
     if (boxId > s.boxCount) return null;
-    return { boxId, stemsAfter: inBox + stems };
+    return { boxId, unitsAfter: inBox + units };
   }
 
   async function handleBunch(raw: string) {
@@ -260,13 +264,13 @@ export default function PackingScreen() {
       // Commit box state only after the write lands.
       packedIdsRef.current.add(bunchId);
       setBoxNumber(plan.boxId);
-      setStemsInBox(plan.stemsAfter);
-      setStemsPacked((prev) => prev + bunch.stemsPerBunch);
+      setUnitsInBox(plan.unitsAfter);
+      setUnitsPacked((prev) => prev + bunch.stemsPerBunch);
 
       playSubmit();
       setFeedback({
         tone: 'success',
-        text: `Box ${plan.boxId} — ${plan.stemsAfter}/${s.capPerBox} stems · ${bunch.itemCode} ${bunch.stemLength}`,
+        text: `Box ${plan.boxId} — ${plan.unitsAfter}/${s.capPerBox} · ${bunch.itemCode} ${bunch.stemLength}`,
       });
       logEntry({
         bunchId,
@@ -366,8 +370,11 @@ export default function PackingScreen() {
           <DetailRow label="Customer" value={session.opl.customer ?? '—'} />
           <DetailRow label="Sales order" value={session.opl.salesOrder ?? '—'} />
           <DetailRow label="Box type" value={session.opl.boxType ?? '—'} />
-          <DetailRow label="Pack rate" value={`${session.capPerBox} stems / box`} />
-          <DetailRow label="Total stems" value={session.opl.totalStems ?? '—'} />
+          {/* Unit-neutral on purpose: custom_packrate and custom_total_stems
+              share a unit, but it is NOT reliably stems (§8.3), so labelling
+              them would be a lie on any OPL the allocator got wrong. */}
+          <DetailRow label="Per box" value={`${session.capPerBox}`} />
+          <DetailRow label="Order total" value={session.opl.totalUnits ?? '—'} />
           <DetailRow label="Boxes" value={`${session.boxCount}`} />
         </View>
         <Button
@@ -385,8 +392,12 @@ export default function PackingScreen() {
               <Text style={styles.itemTitle} numberOfLines={1}>
                 {row.itemCode} · {row.stemLength}
               </Text>
+              {/* Stems, not the fractional bunch count: "0.8 × Bunch(10)" is
+                  unreadable on a shop floor. qty × conversion_factor is the
+                  real stem count; the bunch size stays visible because the
+                  packer needs it. Rounded — 8.333… × 12 is 99.999…, not 100. */}
               <Text style={styles.itemMeta} numberOfLines={1}>
-                {row.qty} × {row.uom}
+                {Math.round(row.qty * row.conversionFactor)} stems · {row.uom}
                 {row.shelf ? ` · shelf ${row.shelf}` : ''}
               </Text>
             </View>
@@ -397,12 +408,12 @@ export default function PackingScreen() {
       {/* Persistent counter — shown always, not only on error. */}
       <Card title={`Box ${boxNumber} of ${session.boxCount}`}>
         <Text style={styles.counter}>
-          {stemsInBox}/{session.capPerBox} stems
+          {unitsInBox} / {session.capPerBox}
         </Text>
         <View style={styles.rows}>
           <DetailRow
             label="Order progress"
-            value={`${stemsPacked} / ${session.opl.totalStems ?? '—'} stems`}
+            value={`${unitsPacked} / ${session.opl.totalUnits ?? '—'}`}
           />
           <DetailRow label="Variety" value={session.opl.rows[0]?.itemCode ?? '—'} />
           <DetailRow label="Lengths" value={lengths || '—'} />
@@ -493,7 +504,7 @@ function OplPickerRow({
         <Text style={styles.pickerDate}>{item.dateCreated ?? ''}</Text>
       </View>
       <Text style={styles.pickerMeta} numberOfLines={1}>
-        {[item.customer, item.boxType, item.totalStems ? `${item.totalStems} stems` : null]
+        {[item.customer, item.boxType, item.totalUnits ? `${item.totalUnits} per order` : null]
           .filter(Boolean)
           .join(' · ') || '—'}
       </Text>

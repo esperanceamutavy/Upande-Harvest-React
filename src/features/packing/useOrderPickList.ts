@@ -21,6 +21,7 @@ function toRow(r: Record<string, unknown>): OplRow {
     warehouse: r.warehouse != null ? String(r.warehouse) : null,
     shelf: r.custom_shelf != null ? String(r.custom_shelf) : null,
     qty: Number(r.qty ?? 0),
+    conversionFactor: Number(r.conversion_factor ?? 0),
     packRate: r.custom_packrate != null ? String(r.custom_packrate) : null,
   };
 }
@@ -45,7 +46,7 @@ async function fetchOrderPickList(name: string): Promise<OrderPickList> {
     // scanned BUNCH instead.
     farm: doc.farm != null ? String(doc.farm) : null,
     boxType: doc.custom_box_type != null ? String(doc.custom_box_type) : null,
-    totalStems: doc.custom_total_stems != null ? String(doc.custom_total_stems) : null,
+    totalUnits: doc.custom_total_stems != null ? String(doc.custom_total_stems) : null,
     isMixedBox: Boolean(doc.custom_is_mixed_box_pick_list),
     rows,
   };
@@ -62,8 +63,12 @@ export function useOrderPickList() {
  *
  * Both arrive as STRINGS, so they are parsed rather than divided directly.
  * `custom_total_stems` is used rather than summing `qty`, because `qty` is in
- * BUNCHES and can be fractional — deriving stems from it invites float error at
- * the cap boundary.
+ * BUNCHES and can be fractional — deriving a total from it invites float error
+ * at the cap boundary.
+ *
+ * ⚠️ Both values are in the OPL's OWN unit, which is not reliably stems despite
+ * the field name (§8.3). The division is safe because they share that unit; the
+ * UI must not call the result stems.
  *
  * Returns null when the OPL cannot support a session (no rows, no pack rate, or
  * a pack rate of zero), so the screen can refuse it up front rather than on the
@@ -76,11 +81,11 @@ export function deriveSession(opl: OrderPickList): PackingSession | null {
   const capPerBox = Number.parseInt(first.packRate ?? '', 10);
   if (!Number.isFinite(capPerBox) || capPerBox <= 0) return null;
 
-  const totalStems = Number.parseInt(opl.totalStems ?? '', 10);
-  if (!Number.isFinite(totalStems) || totalStems <= 0) return null;
+  const totalUnits = Number.parseInt(opl.totalUnits ?? '', 10);
+  if (!Number.isFinite(totalUnits) || totalUnits <= 0) return null;
 
   // Ceil: a trailing partial box is still a box that gets packed.
-  const boxCount = Math.max(1, Math.ceil(totalStems / capPerBox));
+  const boxCount = Math.max(1, Math.ceil(totalUnits / capPerBox));
 
   return { opl, capPerBox, boxCount };
 }
