@@ -125,9 +125,9 @@ Then backfill only what the screens actually need — resist porting all twelve.
 | `OfflineBanner` | **blocked by hard constraints** | Requires `expo-network` (a native module → breaks constraint 6, no longer OTA-shippable) **and** consecutive-API-failure counters wired into the HTTP client (`packhouse/src/core/network/store.ts`), which means editing `src/lib/api.ts` → constraint 3. Not portable without breaking two constraints. Revisit only if a new build is on the table anyway. |
 | `Dropdown` | rejected | `Picker` already covers every call site. Porting it would leave two overlapping select components. |
 
-## 7. Phase 5 — cleanup
+## 7. Phase 5 — cleanup ✅ COMPLETE
 
-All done except the harness removal at the bottom. Two corrections to what this section originally said:
+Two corrections to what this section originally said:
 
 - ~~**Fix the scan line.**~~ **The original bullet was wrong on three counts.** `BarcodeScannerOverlay.tsx` has **no scan line** — no reticle, no animated bar, just a full-bleed `CameraView` and a close button. Line 111 is `settingsBtn`, the "Open Settings" button on the permission-denied screen. And its `ACCENT` was `const ACCENT = '#699dcd'` — a **hardcoded literal, not `colors.accent`** — so Phase 1's alias never touched it and there was no invisible-black-line regression to fix.
 
@@ -139,14 +139,14 @@ All done except the harness removal at the bottom. Two corrections to what this 
 - `index.tsx` `ActivityIndicator color={colors.accent}` → `colors.text`.
 - Deleted `colors.accent` from `theme.ts`; `npx tsc --noEmit` clean. No `colors.accent`, `ACCENT`, or `105,157,205` reference survives anywhere in `src/`.
 - ~~Delete `AppBar.tsx`.~~ **Not in this phase.** `rejects.tsx` is out of Phase 3 and still renders `AppBar`, so the component keeps a live consumer. See §5.
-- **Remove the Phase 2 `ui-preview` harness — all three pieces. ⚠️ DELIBERATELY NOT DONE YET.**
-  1. the route file `src/app/(app)/ui-preview.tsx`
-  2. its `<Tabs.Screen name="ui-preview" options={{ href: null }} />` entry in `src/app/(app)/_layout.tsx`
-  3. the `{ label: 'UI Preview', icon: LayoutGrid, route: '/ui-preview' }` row in `WORKFLOW_ITEMS` in `src/features/navigation/drawerItems.ts`
+- ✅ **Removed the Phase 2 `ui-preview` harness — all three pieces:**
+  1. the route file `src/app/(app)/ui-preview.tsx` — deleted
+  2. its `<Tabs.Screen name="ui-preview" options={{ href: null }} />` entry in `src/app/(app)/_layout.tsx` — removed
+  3. the `{ label: 'UI Preview', … }` row in `WORKFLOW_ITEMS` in `src/features/navigation/drawerItems.ts` — removed
 
-  Missing (2) leaves a `Tabs.Screen` pointing at a route that no longer exists; missing (3) leaves a dead drawer row that throws on tap. Deleting only the file is not enough.
+  Missing (2) would have left a `Tabs.Screen` pointing at a route that no longer exists; missing (3) a dead drawer row that throws on tap. `grep -r ui-preview src/` returns nothing. The `LayoutGrid` import stays in both files — Shelving still uses it.
 
-  **Held back on purpose:** the harness is the only place `Button`'s six variants and `Segmented` can be checked in isolation, and Phases 3–5 have not been verified on a device yet. Deleting it now would remove the instrument before the measurement. **This is the last outstanding Phase 5 item — do it once the device pass is signed off, before the Phase 7 `eas update`.**
+  It was held back deliberately until the device pass, since it was the only place `Button`'s variants and `Segmented` could be checked in isolation. **Phase 5 is now complete.**
 
 ## 8. Phase 6 — Grading and Packing
 
@@ -227,7 +227,7 @@ This is a correctness requirement, not an optimisation. A grading screen without
 
 **Wrap packing writes in `serializeByKey('packing')`.** Distinct key from `'grading'`, so the two flows queue independently rather than blocking each other. Detail in §8.3.
 
-### 8.2 Grading — unblocked, online-only, core flow only. ✅ BUILT
+### 8.2 Grading — ✅ BUILT AND VERIFIED LIVE. Closed.
 
 **ONE call. `mobile_grading_entry`, and nothing else.**
 
@@ -256,9 +256,9 @@ from: "XFL Receiving Coldstore  - XFL"   →   to: "XFL Graded Sold - XFL"
 
 #### Response — FLAT envelope
 
-> 🟡→🟢 **Largely confirmed.** The **error envelope below was read off the LIVE script**, and `createOrUpdateFarmPackList`'s live body turned out byte-identical to the snapshot (§8.3), which corroborates the snapshot reading of these scripts generally. The success shape, the failure modes, the hardcoded warehouses and the 20099–20826 self-heal are still snapshot-sourced and **already in shipped code** — `useSubmitGrading` was rewritten against them.
+> 🟢 **VERIFIED LIVE.** The error envelope, the HTTP status, `_server_messages` presence, the unwrapped error text and the `grader` identifier format were all checked against the live site. `createOrUpdateFarmPackList`'s live body also proved byte-identical to the snapshot (§8.3), corroborating the snapshot reading of these scripts generally.
 >
-> **The first real grading scan on a device confirms the success shape**: if the entries log shows variety and stem count, the flat envelope holds; if rows read "Bunch graded" with nothing else, the parse needs the nested form back. Five seconds on the device pass, not a task.
+> Still snapshot-only, and harmless: the hardcoded warehouse pair and the 20099–20826 self-heal, neither of which the client depends on. The success-response shape is confirmed by the entries log rendering variety and stem count on a real scan.
 
 On success the script sets four **top-level siblings** on `frappe.response`, and `message` is a plain string:
 
@@ -273,58 +273,42 @@ On success the script sets four **top-level siblings** on `frappe.response`, and
 
 **`bucket_remaining_stems` is not returned either**, and would be ignored regardless — production documents it as unreliable on re-used buckets, since it sums every harvest and every bunch the bucket has ever seen with no cycle window and so floors at 0 (`GradeScreen.tsx:310-316`).
 
-#### Error envelope — read off the LIVE script
+#### ✅ Error envelope — VERIFIED LIVE. No client change needed.
 
-On failure the script sets **three** keys, and the shape is unusual enough to matter:
+On failure the script sets `http_status_code: 500`, plus the error text in **both** `message` (the same key that carries the success string) and `error`.
 
-```
-http_status_code: 500
-message:          <the error text>     ← SAME KEY as the success string
-error:            <the error text>
-```
+**Frappe returns a real HTTP 500**, so axios rejects and the interceptor runs — the ordinary error path, no special handling required.
 
-**There is no `_server_messages` and no `exc_type`.** `message` carries the success string on success and the error text on failure, so **the presence of `error` is the only discriminator** in the body itself.
+**`_server_messages` IS present.** Frappe populates it from the `frappe.throw` *before* the script's own `except` block catches and re-raises, so the standard Frappe error envelope survives. `parseFrappeError` therefore reads `serverMessages[0]` — its first and intended branch — and `extractFrappeError` returns that via `err.message`.
 
-**✅ Checked: `extractFrappeError` does handle this — but not by the path it looks like it does.** The chain is worth writing down because two of its branches are dead:
+*Correcting an earlier note here:* this was described as the text surfacing "by fallback rather than by design", through a three-deep accident. **That was wrong** — it assumed `_server_messages` was absent. The standard path is live and the chain is the designed one. The only true observation from that note is that `extractFrappeError`'s `err.response?.data?…` branches are dead for `api.ts`-originated errors, since the interceptor has already normalised to an `ApiError` — that is the interceptor working as intended, not a defect.
 
-1. `apiClient`'s response interceptor rejects with `parseFrappeError(error)`, so what reaches a mutation's `catch` is an **`ApiError` plain object**, not an `AxiosError`. `err.response` is therefore `undefined`, and `extractFrappeError`'s first two branches (`err.response?.data?.message`, `…exception`) **never fire for any error originating in `api.ts`.** It lands on `err.message`.
-2. `parseFrappeError` builds that `message` as `serverMessages[0] ?? data?.message ?? …`. With no `_server_messages`, `serverMessages` is `[]`, so `serverMessages[0]` is `undefined` and it falls through to `data.message` — the error text. ✔
+**Error text arrives unwrapped** — `Bunch BUNCH-123 not found`, with no `Error processing packing:`-style prefix (contrast §8.3). So `isAlreadyGraded`'s substring match runs against the raw server string, exactly as built.
 
-So the text surfaces correctly today, by fallback rather than by design. Two consequences:
+**No hardening applied and none needed.** The earlier suggestion to treat a present `error` key as failure regardless of status is withdrawn: the status is reliable.
 
-- **`excType` will always be `undefined`** for grading errors. Nothing in the grading screen branches on it, but do not add a check that does.
-- **⚠️ The whole chain depends on the response actually arriving as HTTP 500.** Frappe does honour `frappe.response["http_status_code"]`, so axios should reject — but if any layer returned 200 with that key merely present in the body, **axios would not reject and the success path would run**, reading the error text as `message` and finding no `qty` or `variety`. A failed scan would then log a *success* row reading `Bunch graded` with no detail.
+`excType` is still `undefined` for these errors — nothing branches on it, and nothing should start.
 
-  This is observable on the device pass rather than theoretical: **scan an already-graded bunch.** Correct behaviour is an amber duplicate row; the failure mode is a success row with no variety or stem count.
+#### ✅ `grader` — no resolver needed. The shipped code is correct.
 
-  **Recommended hardening, not yet applied** (plan-only for now): in `useSubmitGrading`, treat a present `error` key as failure regardless of HTTP status. That is the discriminator the script actually provides, it costs one condition, and it closes the case above permanently.
-
-#### ⚠️ `grader` must be an Employee DOCUMENT NAME
-
-The script resolves the badge value as a primary key:
+**Employee docnames ARE the payroll numbers.** On this site `name == employee == employee_number`, e.g. `"869"`. So the badge value the QR carries is already the primary key the script looks up:
 
 ```python
 employee = frappe.db.get_value("Employee", graded_by, "name")
-if not employee:
-    frappe.throw(f"Employee {graded_by} does not exist", ...)
 ```
 
-`frappe.db.get_value("Employee", <x>, …)` with a string second argument looks `<x>` up **as the docname** — e.g. `HR-EMP-00001`. Not `employee_name`, not `user_id`, not a payroll number.
+Consequences, all confirming what is already built:
 
-**This is a live risk in the shipped grading screen.** `extractGradingQrValue` prefers `employee_id` when the badge QR carries it:
+- **The local badge latch is correct.** No request is needed at badge-scan time.
+- **`extractGradingQrValue`'s `employee_id` preference is right** — `pick('employee_id', 'employee', 'grader')` resolves to the docname.
+- **`lookup_employee` is optional and not part of this flow.** It resolves a display *name*, not an ID, so it would only serve a nicety like showing the grader's name next to the latched badge.
 
-```ts
-return pick('employee_id', 'employee', 'grader') ?? fallback;
-```
+*Correcting an earlier note here:* this section previously flagged a "live risk in the shipped grading screen" — that `employee_id` might be a payroll number rather than a docname and every scan would fail. **On this site those are the same string, so there was never a risk.** The inference was reasonable from the script alone; it needed the data to settle, and the data says the code is right.
 
-If `employee_id` is a payroll or card number rather than the Frappe docname, **every scan fails with `Employee <x> does not exist`** — and the badge scan itself will not reveal it, because the badge latches locally with no request (§8.2). The failure appears on the first bunch scan.
+#### Two minor findings, neither blocking
 
-Two things to establish, in order:
-
-1. **What do the physical badges actually encode?** One real badge scan answers it. If the value is already the Employee docname, nothing needs doing.
-2. **If not:** the site has a `lookup_employee` Server Script (`api_method: lookup_employee`, enabled). That is almost certainly the resolver for exactly this — badge value → Employee. It would mean the badge scan *does* make a request after all, which is a design change to the latch step, not just a field swap.
-
-Recorded rather than fixed: the resolution depends on badge content that only a device can reveal.
+- **`lookup_employee` returns HTTP 200 with `exists: false`** for an unknown employee — success status, negative result in the body. That is a **fourth response convention** on this backend, alongside grading's flat-with-siblings, packing's `data` envelope, and the conventional nested `message`. **There is no house style: read each script before writing its client.** This is the same lesson §8.0 draws about provenance, arriving from a different direction.
+- **`Employee.user_id` is null across the board**, so the already-graded message's `graded by <name>` lookup — `get_value("Employee", {"user_id": owner}, "employee_name")` — finds nothing and falls back to the raw `owner`. The amber duplicate row will read a username or email rather than a person's name. **Cosmetic**, and it is the server's string, so fixing it is a server-side or data-side change, not a client one.
 
 #### Real failure modes
 
@@ -334,7 +318,7 @@ There are four, all surfaced from the server's own message:
 |---|---|---|
 | **Already graded** | `Bunch <id> has already been graded by <name> (<stock entry>)` | **The one a grader will actually hit.** Duplicate scan, resolved by the guard on `Stock Entry` where `stock_entry_type = 'Grading'`, `custom_bunch_id = <id>`, `docstatus = 1`. |
 | Bunch not found | `Bunch <id> not found` | No `Bunch QR Code` record. See the self-heal note below. |
-| Employee not found | `Employee <grader> does not exist` | The badge value must be the Employee **docname**. **Live risk — see below.** |
+| Employee not found | `Employee <grader> does not exist` | Badge value must be the Employee docname — which on this site IS the payroll number. Confirmed fine; see below. |
 | Invalid bunch size | `Invalid bunch size: '<raw>'` | `bunch_size` on the record has no digits in it. |
 
 **Already-graded is a warning, not an error.** It means the bunch is already in the system — a benign outcome for the packer, and materially different from a hard failure. The client substring-matches `already been graded` and renders it as a `warn` `Notice` plus an amber log row, reserving red for the other three. Substring, not equality: the message interpolates a name and a document id.

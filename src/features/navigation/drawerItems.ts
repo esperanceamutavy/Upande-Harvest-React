@@ -32,8 +32,6 @@ export const WORKFLOW_ITEMS: DrawerItem[] = [
   { label: 'Shelving', icon: LayoutGrid, route: '/shelving' },
   { label: 'Issuing', icon: PackageCheck, route: '/issuing' },
   { label: 'Grading', icon: Hexagon, route: '/grading' },
-  // TEMPORARY — Phase 2 device-verification entry point. Delete in Phase 5.
-  { label: 'UI Preview', icon: LayoutGrid, route: '/ui-preview' },
   //
   // Still to come (RESTYLE_PLAN.md §8):
   //   Packing → Box   → '/packing'  — blocked on the three add_bunch_to_box
