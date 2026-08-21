@@ -49,10 +49,13 @@ function startOfWeek(): Date {
 /** Inclusive `[from, to]` on `delivery_date`, or null for "all time". */
 function deliveryWindow(range: OplDateFilter): [string, string] | null {
   switch (range) {
-    case 'today':
-      // TWO DAYS on purpose: packers pack today for tomorrow's flight, so an
-      // order due tomorrow is what is actually on the bench now.
-      return [localDate(new Date()), localDate(shiftDays(1))];
+    case 'tomorrow': {
+      // TOMORROW ONLY. Packing runs a day ahead of the flight, so an order due
+      // today was dispatched already and has no business on the bench. On the
+      // 21st this shows deliveries dated the 22nd.
+      const due = localDate(shiftDays(1));
+      return [due, due];
+    }
     case 'yesterday': {
       const y = localDate(shiftDays(-1));
       return [y, y];

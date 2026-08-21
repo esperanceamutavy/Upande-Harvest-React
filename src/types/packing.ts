@@ -24,8 +24,8 @@ export interface OplRow {
   packRate: string | null;
 }
 
-/** Date window for the OPL picker. */
-export type OplDateFilter = 'today' | 'yesterday' | 'week' | 'all';
+/** Delivery-date window for the OPL picker. */
+export type OplDateFilter = 'tomorrow' | 'yesterday' | 'week' | 'all';
 
 /** One row in the OPL picker — the list query's projection, no children. */
 export interface OplListItem {

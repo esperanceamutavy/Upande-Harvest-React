@@ -82,22 +82,21 @@ function rangeBelow(boxNumber: number): number[] {
   return out;
 }
 
-// "Today" would be wrong: the range is today AND tomorrow, because packers pack
-// today for tomorrow's flight. Anything implying urgency ("Due now") would read
-// as overdue, which is the opposite of a forward-looking window.
+// Filtered on the Sales Order's delivery_date throughout.
 //
-// Four options across a phone leaves little room, so the long label degrades to
-// the short one when the measured segment cannot hold it, rather than clipping.
+// The default is TOMORROW ONLY: packing runs a day ahead of the flight, so an
+// order due today has already been dispatched. A same-day delivery is still
+// reachable — "This week" is Monday–Sunday and so always contains today — which
+// is why no separate "Today" option is needed.
+//
+// The other three are for looking back or hunting something outside the normal
+// rhythm. All four labels are short enough not to need a shortLabel fallback.
 const DATE_OPTIONS = [
-  { value: 'today', label: 'Today + tomorrow', shortLabel: 'Next 2 days' },
+  { value: 'tomorrow', label: 'Tomorrow' },
   { value: 'yesterday', label: 'Yesterday' },
   { value: 'week', label: 'This week' },
   { value: 'all', label: 'All time' },
-] as const satisfies readonly {
-  value: OplDateFilter;
-  label: string;
-  shortLabel?: string;
-}[];
+] as const satisfies readonly { value: OplDateFilter; label: string }[];
 
 type FeedbackMsg = { tone: NoticeTone; text: string; pdfUrl?: string | null };
 
@@ -116,7 +115,7 @@ export default function PackingScreen() {
   // `file_url` comes back relative to the instance, so it needs the base URL to
   // be openable.
   const instanceUrl = useAuthStore((st) => st.instanceUrl);
-  const [range, setRange] = useState<OplDateFilter>('today');
+  const [range, setRange] = useState<OplDateFilter>('tomorrow');
   const oplList = useOplList(range);
   const oplMut = useOrderPickList();
   const targetsMut = useSalesOrderTargets();
