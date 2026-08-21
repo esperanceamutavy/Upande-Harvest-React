@@ -25,6 +25,13 @@ import type { SalesOrderTargets } from '../../types/packing';
 // `conversion_factor` does NOT rescue this: on a Stems line it is 1, not the
 // bunch size. The bunch size has to come from somewhere else entirely.
 
+/** Trimmed string, or null for anything empty — so callers can omit the row. */
+function _text(value: unknown): string | null {
+    const text = value != null ? String(value).trim() : '';
+    return text.length > 0 ? text : null;
+}
+
+
 async function fetchSalesOrderTargets({
   salesOrder,
   oplName,
@@ -78,6 +85,11 @@ async function fetchSalesOrderTargets({
     uom,
     conversionFactor,
     stockQty: Number(row.stock_qty ?? 0),
+    // On the LINE, not the header — the header's field of the same name is
+    // usually blank.
+    customerCode: _text(row.custom_customer_code),
+    truckDetails: _text(doc.custom_truck_details),
+    consignee: _text(doc.custom_consignee),
     stemsPerBunch: units.stemsPerBunch,
     unitLabel: units.unitLabel,
     capPerBox: units.capPerBox,

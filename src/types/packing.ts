@@ -38,6 +38,14 @@ export interface OplListItem {
   /** The Sales Order's `delivery_date`. This is what the picker filters on, so
    *  it is shown on every row. Null only if the SO lookup came back without one. */
   deliveryDate: string | null;
+
+  // ── Contents summary, so a packer can tell OPLs apart without opening each ──
+  /** Distinct varieties on the pick list. */
+  varieties: string[];
+  /** Distinct stem lengths. */
+  lengths: string[];
+  /** Total bunches across every row. */
+  bunches: number;
 }
 
 export interface OplListResult {
@@ -84,6 +92,14 @@ export interface SalesOrderTargets {
   conversionFactor: number;
   /** `stock_qty` — the order in stems. Display only. */
   stockQty: number;
+
+  /** `custom_customer_code` from the matched SO LINE — the header field of the
+   *  same name is usually blank. Shaped `"<customer>-<code>"`. */
+  customerCode: string | null;
+  /** `custom_truck_details` — Sales Order header. */
+  truckDetails: string | null;
+  /** `custom_consignee` — Sales Order header. Box Label carries it too. */
+  consignee: string | null;
 
   /**
    * Stems per bunch, resolved in order: the OPL row's `Bunch(N)` uom, then the

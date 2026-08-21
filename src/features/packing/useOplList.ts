@@ -107,7 +107,69 @@ async function dueSalesOrders(window: [string, string]): Promise<Map<string, str
   return byName;
 }
 
-function toItem(r: Record<string, unknown>, deliveryDate: string | null): OplListItem {
+interface Contents {
+  varieties: string[];
+  lengths: string[];
+  bunches: number;
+}
+
+/** Contents for every listed OPL in ONE query.
+ *
+ *  Not one fetch per OPL document: a "This week" range is routinely dozens of
+ *  pick lists, and OPL-2026-02962 alone carries 92 rows. Rows are collapsed to
+ *  distinct varieties and lengths, since one OPL commonly repeats the same
+ *  variety at the same length many times over.
+ *
+ *  Bunches come from each row's own `qty`, rounded, matching what the item
+ *  lines already render. NOT from `custom_total_stems`, which is unreliable
+ *  while the allocator bug stands (§8.3).
+ */
+async function fetchContents(oplNames: string[]): Promise<Map<string, Contents>> {
+  const byOpl = new Map<string, Contents>();
+  if (oplNames.length === 0) return byOpl;
+
+  const rows = await getResource(
+    'Pick List Item',
+    ['parent', 'item_code', 'custom_stem_length', 'qty'],
+    [['parent', 'in', oplNames]],
+  );
+
+  const seenVariety = new Map<string, Set<string>>();
+  const seenLength = new Map<string, Set<string>>();
+
+  for (const r of rows) {
+    const parent = String(r.parent ?? '');
+    if (!parent) continue;
+
+    const entry = byOpl.get(parent) ?? { varieties: [], lengths: [], bunches: 0 };
+    const varieties = seenVariety.get(parent) ?? new Set<string>();
+    const lengths = seenLength.get(parent) ?? new Set<string>();
+
+    const variety = r.item_code != null ? String(r.item_code).trim() : '';
+    const length = r.custom_stem_length != null ? String(r.custom_stem_length).trim() : '';
+    if (variety) varieties.add(variety);
+    if (length) lengths.add(length);
+
+    entry.bunches += Math.round(Number(r.qty ?? 0) || 0);
+
+    byOpl.set(parent, entry);
+    seenVariety.set(parent, varieties);
+    seenLength.set(parent, lengths);
+  }
+
+  for (const [parent, entry] of byOpl) {
+    entry.varieties = [...(seenVariety.get(parent) ?? [])].sort();
+    entry.lengths = [...(seenLength.get(parent) ?? [])].sort();
+  }
+
+  return byOpl;
+}
+
+function toItem(
+  r: Record<string, unknown>,
+  deliveryDate: string | null,
+  contents: Contents | undefined,
+): OplListItem {
   return {
     name: String(r.name ?? ''),
     customer: r.customer != null ? String(r.customer) : null,
@@ -115,6 +177,9 @@ function toItem(r: Record<string, unknown>, deliveryDate: string | null): OplLis
     totalUnits: r.custom_total_stems != null ? String(r.custom_total_stems) : null,
     boxType: r.custom_box_type != null ? String(r.custom_box_type) : null,
     deliveryDate,
+    varieties: contents?.varieties ?? [],
+    lengths: contents?.lengths ?? [],
+    bunches: contents?.bunches ?? 0,
   };
 }
 
@@ -144,8 +209,11 @@ async function fetchOplList(range: OplDateFilter): Promise<OplListResult> {
       );
     }
 
+    const contents = await fetchContents(rows.map((r) => String(r.name ?? '')).filter(Boolean));
     return {
-      items: rows.map((r) => toItem(r, dates.get(String(r.sales_order ?? '')) ?? null)),
+      items: rows.map((r) =>
+        toItem(r, dates.get(String(r.sales_order ?? '')) ?? null, contents.get(String(r.name ?? ''))),
+      ),
       notice: null,
     };
   }
@@ -167,8 +235,12 @@ async function fetchOplList(range: OplDateFilter): Promise<OplListResult> {
     'creation desc',
   );
 
+  const contents = await fetchContents(rows.map((r) => String(r.name ?? '')).filter(Boolean));
+
   return {
-    items: rows.map((r) => toItem(r, due.get(String(r.sales_order ?? '')) ?? null)),
+    items: rows.map((r) =>
+      toItem(r, due.get(String(r.sales_order ?? '')) ?? null, contents.get(String(r.name ?? ''))),
+    ),
     notice: null,
   };
 }

@@ -32,7 +32,7 @@ import { Card, Notice, type NoticeTone } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
 import { Screen } from '../../components/ui/Screen';
 import { Segmented } from '../../components/ui/Segmented';
-import { colors, radii, spacing } from '../../components/ui/theme';
+import { colors, radii, spacing, typography } from '../../components/ui/theme';
 import type {
   BunchDetails,
   OplDateFilter,
@@ -59,6 +59,21 @@ import type {
 // silently packs into the wrong warehouse.
 
 const MAX_LOG_ROWS = 12;
+
+/**
+ * `"Dutch Flower Group (DFG)-TGW Flower 01"` → code + customer.
+ *
+ * Split on the LAST hyphen: customer names contain them, packer-facing codes
+ * are the tail. No hyphen means the whole string is the code.
+ */
+function splitCustomerCode(raw: string): { code: string; customer: string | null } {
+  const at = raw.lastIndexOf('-');
+  if (at < 0) return { code: raw.trim(), customer: null };
+  const customer = raw.slice(0, at).trim();
+  const code = raw.slice(at + 1).trim();
+  if (!code) return { code: raw.trim(), customer: null };
+  return { code, customer: customer || null };
+}
 
 /** [1 .. boxNumber-1] — every box the session has moved past. */
 function rangeBelow(boxNumber: number): number[] {
@@ -517,7 +532,24 @@ export default function PackingScreen() {
         <View style={styles.rows}>
           <DetailRow label="Pick list" value={session.opl.name} />
           <DetailRow label="Customer" value={session.opl.customer ?? '—'} />
+          {/* Each omitted entirely when empty — a blank row is worse than none.
+              The code lives on the Sales Order LINE; the header field of the
+              same name is usually blank. */}
+          {session.targets.customerCode
+            ? (() => {
+                const { code, customer } = splitCustomerCode(session.targets.customerCode!);
+                // The caption usually repeats the Customer row above. That is
+                // deliberate — it confirms the code belongs to that customer.
+                return <DetailRow label="Customer code" value={code} caption={customer} />;
+              })()
+            : null}
           <DetailRow label="Sales order" value={session.opl.salesOrder ?? '—'} />
+          {session.targets.consignee ? (
+            <DetailRow label="Consignee" value={session.targets.consignee} />
+          ) : null}
+          {session.targets.truckDetails ? (
+            <DetailRow label="Truck" value={session.targets.truckDetails} />
+          ) : null}
           <DetailRow label="Box type" value={session.opl.boxType ?? '—'} />
           {/* Targets from the SALES ORDER, not the OPL — the allocator is
               broken and OPL quantities under-report (§8.3). */}
@@ -682,21 +714,48 @@ function OplPickerRow({
         </Text>
       </View>
       <Text style={styles.pickerMeta} numberOfLines={1}>
-        {[item.customer, item.boxType, item.totalUnits ? `${item.totalUnits} per order` : null]
-          .filter(Boolean)
-          .join(' · ') || '—'}
+        {[item.customer, item.boxType].filter(Boolean).join(' · ') || '—'}
       </Text>
+      {/* What is actually IN the pick list, so a packer can tell them apart
+          without opening each one. Duplicates are collapsed — one OPL commonly
+          repeats a variety at a length dozens of times. */}
+      {item.varieties.length > 0 || item.bunches > 0 ? (
+        <Text style={styles.pickerContents} numberOfLines={2}>
+          {[
+            item.varieties.join(', '),
+            item.lengths.join(', '),
+            item.bunches > 0 ? `${item.bunches} bunches` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({
+  label,
+  value,
+  caption,
+}: {
+  label: string;
+  value: string;
+  caption?: string | null;
+}) {
   return (
-    <View style={styles.detailRow}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue} numberOfLines={1}>
-        {value}
-      </Text>
+    <View style={styles.detailBlock}>
+      <View style={styles.detailRow}>
+        <Text style={styles.detailLabel}>{label}</Text>
+        <Text style={styles.detailValue} numberOfLines={1}>
+          {value}
+        </Text>
+      </View>
+      {caption ? (
+        <Text style={styles.detailCaption} numberOfLines={1}>
+          {caption}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -775,7 +834,9 @@ const styles = StyleSheet.create({
   },
 
   rows: { gap: 4 },
+  detailBlock: { gap: 1 },
   detailRow: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
+  detailCaption: { ...typography.caption, textAlign: 'right' },
   detailLabel: { fontSize: 13, color: colors.muted },
   detailValue: {
     fontSize: 13,
@@ -801,6 +862,7 @@ const styles = StyleSheet.create({
   pickerName: { fontSize: 14, fontWeight: '600', color: colors.primary, flexShrink: 1 },
   pickerDate: { fontSize: 12, color: colors.muted },
   pickerMeta: { fontSize: 13, color: colors.textSecondary },
+  pickerContents: { fontSize: 13, fontWeight: '500', color: colors.primary, marginTop: 2 },
 
   itemRow: { gap: 2 },
   itemTitle: { fontSize: 13, fontWeight: '600', color: colors.primary },
