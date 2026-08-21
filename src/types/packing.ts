@@ -1,3 +1,5 @@
+import type { ResumeState } from '../features/packing/resume';
+
 // Packing contract — confirmed against the live Server Script and live OPL
 // documents on xflora.upande.com. RESTYLE_PLAN.md §8.3.
 //
@@ -113,6 +115,8 @@ export interface PackingSession {
   /** Shelf, warehouse, item rows, and the id sent as `custom_order_pick_list`. */
   opl: OrderPickList;
   targets: SalesOrderTargets;
+  /** Where the session resumed from — see features/packing/resume.ts. */
+  resume: ResumeState;
 }
 
 /** A bunch resolved from its QR, ready to validate and submit. */

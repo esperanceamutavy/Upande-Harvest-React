@@ -13,6 +13,8 @@ import { QrCode } from 'lucide-react-native';
 import { useOplList } from '../../features/packing/useOplList';
 import { useOrderPickList } from '../../features/packing/useOrderPickList';
 import { useSalesOrderTargets } from '../../features/packing/useSalesOrderTargets';
+import { useExistingPack } from '../../features/packing/useExistingPack';
+import { formatBoxRanges, resumePlan } from '../../features/packing/resume';
 import { useBunchDetails } from '../../features/packing/useBunchDetails';
 import {
   classifyPackError,
@@ -58,6 +60,13 @@ import type {
 
 const MAX_LOG_ROWS = 12;
 
+/** [1 .. boxNumber-1] — every box the session has moved past. */
+function rangeBelow(boxNumber: number): number[] {
+  const out: number[] = [];
+  for (let n = 1; n < boxNumber; n += 1) out.push(n);
+  return out;
+}
+
 // "Today" would be wrong: the range is today AND tomorrow, because packers pack
 // today for tomorrow's flight. Anything implying urgency ("Due now") would read
 // as overdue, which is the opposite of a forward-looking window.
@@ -96,6 +105,7 @@ export default function PackingScreen() {
   const oplList = useOplList(range);
   const oplMut = useOrderPickList();
   const targetsMut = useSalesOrderTargets();
+  const existingMut = useExistingPack();
   const bunchMut = useBunchDetails();
   const packMut = usePackBunch();
 
@@ -125,7 +135,7 @@ export default function PackingScreen() {
   const seqRef = useRef(0);
   const bunchRef = useRef<TextInput>(null);
 
-  const loadingOpl = oplMut.isPending || targetsMut.isPending;
+  const loadingOpl = oplMut.isPending || targetsMut.isPending || existingMut.isPending;
   const busy = bunchMut.isPending || packMut.isPending;
 
   function setBunchProgrammatic(value: string) {
@@ -187,13 +197,44 @@ export default function PackingScreen() {
         oplUom: opl.rows[0]?.uom ?? '',
       });
 
-      setSession({ opl, targets });
-      setBoxNumber(1);
-      setInBox(0);
-      setPackedTotal(0);
+      // RESUME, do not restart. Reopening a partially packed OPL used to show
+      // "Box 1 of N — 0 packed", so the packer refilled full boxes and every
+      // scan came back as already packed.
+      const existing = await existingMut.mutateAsync(opl.name);
+      const resume = resumePlan(
+        existing.perBox,
+        targets.capPerBox,
+        targets.boxCount,
+        targets.unitLabel,
+      );
+
+      setSession({ opl, targets, resume });
+      setBoxNumber(resume.boxNumber);
+      setInBox(resume.inBox);
+      setPackedTotal(resume.packedTotal);
       setEntries([]);
       packedIdsRef.current = new Set();
       setBunchProgrammatic('');
+
+      if (resume.isComplete) {
+        setFeedback({
+          tone: 'warn',
+          text: `${opl.name} is fully packed — all ${targets.boxCount} boxes are complete. Nothing further can be added.`,
+        });
+        playError();
+        return;
+      }
+
+      const done = formatBoxRanges(resume.completeBoxes);
+      if (done) {
+        setFeedback({
+          tone: 'info',
+          text: `Resuming at Box ${resume.boxNumber} of ${targets.boxCount}${
+            resume.inBox > 0 ? ` (${resume.inBox} of ${targets.capPerBox} ${targets.unitLabel} already in it)` : ''
+          } · boxes ${done} complete.`,
+        });
+      }
+
       haptics.light();
       bunchRef.current?.focus();
     } catch (e) {
@@ -464,6 +505,12 @@ export default function PackingScreen() {
   // ── STEPS 2 + 3: review, then scan ───────────────────────────────────────
   const lengths = [...new Set(session.opl.rows.map((r) => r.stemLength))].join(', ');
 
+  // Boxes finished BEFORE this session plus any finished during it. boxNumber
+  // only advances once a box fills, so every box below it is complete.
+  const completedBoxes = formatBoxRanges(
+    Array.from(new Set([...session.resume.completeBoxes, ...rangeBelow(boxNumber)])),
+  );
+
   return (
     <Screen title="Packing">
       <Card title="Order pick list">
@@ -523,6 +570,12 @@ export default function PackingScreen() {
             label="Order progress"
             value={`${packedTotal} of ${session.targets.orderTotal} ${session.targets.unitLabel}`}
           />
+          {/* Persistent, unlike the resume Notice which the next scan clears.
+              A packer returning to a part-packed order needs to see that boxes
+              1-3 are done without re-reading a message that has gone. */}
+          {completedBoxes ? (
+            <DetailRow label="Boxes complete" value={completedBoxes} />
+          ) : null}
           {/* Surfaced so a packer can sanity-check they have Bunch(10) and not
               Bunch(12): a wrong-size bunch passes both Rule 1 and Rule 3 today
               — the unguarded gap recorded in §8.3. */}
@@ -587,7 +640,7 @@ export default function PackingScreen() {
       ) : null}
 
       <Text style={styles.hint}>
-        {packedTotal >= session.targets.orderTotal
+        {session.resume.isComplete || packedTotal >= session.targets.orderTotal
           ? 'Order fully packed. Change pick list to start another.'
           : 'Boxes advance automatically when the pack rate is reached.'}
       </Text>
