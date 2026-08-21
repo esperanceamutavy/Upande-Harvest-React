@@ -289,6 +289,18 @@ On failure the script sets `http_status_code: 500`, plus the error text in **bot
 
 `excType` is still `undefined` for these errors — nothing branches on it, and nothing should start.
 
+#### ⚠️ `getReadySaleOrderItemsData` takes an OPL NAME, not a Sales Order name
+
+Despite the parameter being called `custom_order_name` and the endpoint being called *Sale Order* Items Data, the script matches it against submitted **`Order Pick LIst`** names. Passing a `SAL-ORD-…` never matches and returns an empty `packing_list` with `"No submitted Order Pick List found with order name: …"`. That is what broke By-order mode.
+
+**A Sales Order has one OPL per line**, so the client resolves the SO's lines to their distinct `custom_opl` values and fans out, merging the results. The screen still selects a Sales Order; the resolution is hidden in the hook.
+
+**`message` is NOT an error flag.** It is set on every path, success included (`"Found N unissued items…"`), so it is only meaningful when `packing_list` is empty. The client surfaces it in that case and otherwise ignores it.
+
+**🔴 Why surfacing it matters — the script may fail on every call.** Inside its per-item loop it reads `so_item_info.custom_length` and `so_item_info.custom_mixed_box` off `Sales Order Item`. `custom_length` exists. **`custom_mixed_box` does not** — it is absent from that doctype's custom fields — so accessing it raises, the outer `except` catches, and the response is an empty list with `"Error generating packing list: …"`. Left unsurfaced that reads as "this order has nothing to issue".
+
+**For the backend owner:** either add `custom_mixed_box` to `Sales Order Item` or guard the read with `.get()`. Until then By-order mode may return nothing for every order, and the reason is now visible in the UI rather than silent.
+
 #### Issuing — SCAN-FIRST is the default; order-first is an option
 
 `getBucketIssueInfo` is the router for the whole screen, which is what it was written for: it returns `sale_order_item`, `opl_name`, `sales_order`, `variety` and `shelf`, so a scan needs no manual order selection.

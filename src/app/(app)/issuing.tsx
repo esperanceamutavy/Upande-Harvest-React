@@ -160,8 +160,16 @@ export default function IssuingScreen() {
     setFeedback(null);
     try {
       const result = await fetchItems.mutateAsync(name);
-      setItems(result);
-      bucketRef.current?.focus();
+      setItems(result.items);
+      // An empty list is never shown bare: the server always explains itself,
+      // and those explanations include real failures ("Error generating packing
+      // list: …") that used to render as a silent empty state.
+      if (result.notice) {
+        setFeedback({ tone: 'warn', text: result.notice });
+        playError();
+      } else {
+        bucketRef.current?.focus();
+      }
     } catch (e) {
       setFeedback({ tone: 'danger', text: extractFrappeError(e) });
       playError();

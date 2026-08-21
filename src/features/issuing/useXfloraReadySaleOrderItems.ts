@@ -3,10 +3,35 @@ import { useMutation } from '@tanstack/react-query';
 import { apiClient } from '../../lib/api';
 import type { XfloraReadySaleOrderItem } from '../../types/xflora';
 
-// Call B — POST /api/method/getReadySaleOrderItemsData { custom_order_name } → the packing
-// list for one order. A mutation (not a query) because it is triggered on order-select and
-// the result is held in local screen state that we mutate optimistically after an issue.
-// Ported from api_service.dart:1364 + XfloraPackingListResponse / XfloraReadySaleOrderItem.
+// POST /api/method/getReadySaleOrderItemsData { custom_order_name }
+//
+// ⚠️ `custom_order_name` IS AN ORDER PICK LIST NAME, NOT A SALES ORDER NAME.
+// The script matches it against submitted `Order Pick LIst` names; a
+// `SAL-ORD-…` never matches, and the call comes back with an empty
+// `packing_list` and the message "No submitted Order Pick List found with order
+// name: …". That mismatch is what broke By-order mode.
+//
+// A Sales Order has ONE OPL PER LINE, so this resolves the SO's lines to their
+// distinct `custom_opl` values and fans out, merging the results. The screen
+// still passes a Sales Order name — the resolution is hidden here.
+//
+// Response is FLAT: `packing_list` and `message` are top-level siblings, and
+// `message` is set on EVERY path including success ("Found N unissued items…").
+// So it is not an error flag; it is only meaningful when the list is empty.
+
+interface DataResponse {
+  list: unknown[];
+  message: string | null;
+}
+
+export interface ReadyOrderItems {
+  items: XfloraReadySaleOrderItem[];
+  /** Server explanation, surfaced only when nothing came back. Never null in
+   *  that case if the server said anything — an empty list with no reason is
+   *  exactly what made this fail silently before. */
+  notice: string | null;
+}
+
 function parseItem(raw: unknown): XfloraReadySaleOrderItem {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   return {
@@ -24,30 +49,72 @@ function parseItem(raw: unknown): XfloraReadySaleOrderItem {
   };
 }
 
-async function fetchOrderItems(orderName: string): Promise<XfloraReadySaleOrderItem[]> {
+/** One call, for one OPL name. */
+async function fetchForOpl(oplName: string): Promise<DataResponse> {
   const res = await apiClient.post<Record<string, unknown>>(
     '/api/method/getReadySaleOrderItemsData',
-    { custom_order_name: orderName },
+    { custom_order_name: oplName },
   );
   const body = res.data ?? {};
   const msg = (body.message && typeof body.message === 'object' ? body.message : null) as
     | Record<string, unknown>
     | null;
 
-  let path: 'top-level' | 'message' | 'empty';
-  let list: unknown[];
-  if (Array.isArray(body.packing_list)) {
-    list = body.packing_list;
-    path = 'top-level';
-  } else if (msg && Array.isArray(msg.packing_list)) {
-    list = msg.packing_list;
-    path = 'message';
-  } else {
-    list = [];
-    path = 'empty';
+  const list = Array.isArray(body.packing_list)
+    ? body.packing_list
+    : msg && Array.isArray(msg.packing_list)
+      ? msg.packing_list
+      : [];
+
+  return {
+    list,
+    message: typeof body.message === 'string' ? body.message : null,
+  };
+}
+
+/** Resolve a Sales Order to the distinct OPLs its lines point at. */
+async function oplsForSalesOrder(salesOrder: string): Promise<string[]> {
+  const res = await apiClient.get<{ data?: Record<string, unknown> }>(
+    `/api/resource/${encodeURIComponent('Sales Order')}/${encodeURIComponent(salesOrder)}`,
+  );
+  const items = Array.isArray(res.data?.data?.items)
+    ? (res.data!.data!.items as Record<string, unknown>[])
+    : [];
+
+  const seen = new Set<string>();
+  for (const row of items) {
+    const opl = row.custom_opl != null ? String(row.custom_opl).trim() : '';
+    if (opl) seen.add(opl);
   }
-  console.log(`[issuing] getReadySaleOrderItemsData envelope: ${path} (${list.length} items)`);
-  return list.map(parseItem);
+  return [...seen];
+}
+
+async function fetchOrderItems(salesOrder: string): Promise<ReadyOrderItems> {
+  const opls = await oplsForSalesOrder(salesOrder);
+  if (opls.length === 0) {
+    return {
+      items: [],
+      notice: `${salesOrder} has no pick list on any of its lines, so there is nothing to issue against.`,
+    };
+  }
+
+  // One OPL per line, so a multi-line order needs every one of them merged.
+  const results = await Promise.all(opls.map(fetchForOpl));
+  const items = results.flatMap((r) => r.list).map(parseItem);
+
+  if (items.length > 0) return { items, notice: null };
+
+  // Nothing came back. Surface whatever the server said rather than rendering
+  // an empty list — the messages here include real failures, e.g. "Error
+  // generating packing list: …" from the script's outer except.
+  const reasons = [...new Set(results.map((r) => r.message).filter(Boolean) as string[])];
+  return {
+    items: [],
+    notice:
+      reasons.length > 0
+        ? reasons.join(' · ')
+        : `No unissued items on ${opls.join(', ')}.`,
+  };
 }
 
 export function useXfloraReadySaleOrderItems() {
