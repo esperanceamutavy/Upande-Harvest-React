@@ -110,11 +110,10 @@ export default function PackingScreen() {
   // The per-bunch increment is the bunch's own stem count, which is correct
   // when the OPL is well-formed and wrong in the same direction as the OPL when
   // it is not — see the allocator defect in §8.3.
-  // Everything is bunches now: the cap and the target both come from the Sales
-  // Order in bunches, and one scan is one bunch. No unit conversion left in the
-  // hot path, and nothing to compare across units.
-  const [bunchesInBox, setBunchesInBox] = useState(0);
-  const [bunchesPacked, setBunchesPacked] = useState(0);
+  // Counted in session.targets.unitLabel — bunches when the bunch size could be
+  // resolved, stems when it could not. Never assume bunches.
+  const [inBox, setInBox] = useState(0);
+  const [packedTotal, setPackedTotal] = useState(0);
 
   const [entries, setEntries] = useState<PackEntry[]>([]);
   const [feedback, setFeedback] = useState<FeedbackMsg | null>(null);
@@ -183,12 +182,15 @@ export default function PackingScreen() {
       const targets = await targetsMut.mutateAsync({
         salesOrder: opl.salesOrder,
         oplName: opl.name,
+        // First choice for resolving bunch size; the SO's custom_bunching is
+        // the fallback when the OPL row's uom is not Bunch(N).
+        oplUom: opl.rows[0]?.uom ?? '',
       });
 
       setSession({ opl, targets });
       setBoxNumber(1);
-      setBunchesInBox(0);
-      setBunchesPacked(0);
+      setInBox(0);
+      setPackedTotal(0);
       setEntries([]);
       packedIdsRef.current = new Set();
       setBunchProgrammatic('');
@@ -205,8 +207,8 @@ export default function PackingScreen() {
     setSession(null);
     setBunchProgrammatic('');
     setBoxNumber(1);
-    setBunchesInBox(0);
-    setBunchesPacked(0);
+    setInBox(0);
+    setPackedTotal(0);
     setEntries([]);
     packedIdsRef.current = new Set();
     setFeedback(null);
@@ -230,17 +232,20 @@ export default function PackingScreen() {
 
   /**
    * Rule 1 — which box this bunch goes into. Pure; commits nothing.
-   * One scan is one bunch, and the cap is in bunches, so this is a plain count.
+   *
+   * The increment is one BUNCH when the session counts bunches, and the scanned
+   * bunch's own stem count when it counts stems. The scanned bunch always knows
+   * its own size even when the order does not.
    */
-  function planBox(s: PackingSession): { boxId: number; bunchesAfter: number } | null {
-    let boxId = boxNumber;
-    let inBox = bunchesInBox;
-    if (inBox + 1 > s.targets.capBunches) {
-      boxId += 1;
-      inBox = 0;
+  function planBox(s: PackingSession, increment: number): { boxId: number; after: number } | null {
+    let nextBox = boxNumber;
+    let count = inBox;
+    if (count + increment > s.targets.capPerBox) {
+      nextBox += 1;
+      count = 0;
     }
-    if (boxId > s.targets.boxCount) return null;
-    return { boxId, bunchesAfter: inBox + 1 };
+    if (nextBox > s.targets.boxCount) return null;
+    return { boxId: nextBox, after: count + increment };
   }
 
   async function handleBunch(raw: string) {
@@ -284,7 +289,8 @@ export default function PackingScreen() {
         return;
       }
 
-      const plan = planBox(s);
+      const increment = s.targets.unitLabel === 'bunches' ? 1 : bunch.stemsPerBunch;
+      const plan = planBox(s, increment);
       if (!plan) {
         reject(
           bunchId,
@@ -296,8 +302,9 @@ export default function PackingScreen() {
 
       // Known BEFORE the request, because the payload has to carry it: this
       // scan closes the box when its count lands exactly on the cap.
-      const cap = s.targets.capBunches;
-      const boxClosed = plan.bunchesAfter >= cap;
+      const cap = s.targets.capPerBox;
+      const unit = s.targets.unitLabel;
+      const boxClosed = plan.after >= cap;
       const lastBox = plan.boxId >= s.targets.boxCount;
 
       const res = await packMut.mutateAsync({
@@ -325,8 +332,8 @@ export default function PackingScreen() {
       // Commit box state only after the write lands.
       packedIdsRef.current.add(bunchId);
       setBoxNumber(plan.boxId);
-      setBunchesInBox(plan.bunchesAfter);
-      setBunchesPacked((prev) => prev + 1);
+      setInBox(plan.after);
+      setPackedTotal((prev) => prev + increment);
 
       // ── Box-full announcement ────────────────────────────────────────────
       // The counter card advances on its own; this is the announcement, not the
@@ -343,7 +350,7 @@ export default function PackingScreen() {
 
       const closeText = lastBox
         ? `Box ${plan.boxId} of ${s.targets.boxCount} complete — order fully packed.`
-        : `Box ${plan.boxId} of ${s.targets.boxCount} complete — ${plan.bunchesAfter} of ${cap} bunches. Starting Box ${plan.boxId + 1}.`;
+        : `Box ${plan.boxId} of ${s.targets.boxCount} complete — ${plan.after} of ${cap} ${unit}. Starting Box ${plan.boxId + 1}.`;
 
       if (boxClosed && res.boxLabelPdfError) {
         // The PACK succeeded; only the label render failed. Warn, never a
@@ -357,7 +364,7 @@ export default function PackingScreen() {
       } else {
         setFeedback({
           tone: 'success',
-          text: `Box ${plan.boxId} — ${plan.bunchesAfter} of ${cap} bunches · ${bunch.itemCode} ${bunch.stemLength}`,
+          text: `Box ${plan.boxId} — ${plan.after} of ${cap} ${unit} · ${bunch.itemCode} ${bunch.stemLength}`,
         });
       }
 
@@ -468,8 +475,14 @@ export default function PackingScreen() {
           {/* Targets from the SALES ORDER, not the OPL — the allocator is
               broken and OPL quantities under-report (§8.3). */}
           <DetailRow label="Bunch size" value={session.targets.uom} />
-          <DetailRow label="Per box" value={`${session.targets.capBunches} bunches`} />
-          <DetailRow label="Order target" value={`${session.targets.targetBunches} bunches`} />
+          <DetailRow
+            label="Per box"
+            value={`${session.targets.capPerBox} ${session.targets.unitLabel}`}
+          />
+          <DetailRow
+            label="Order target"
+            value={`${session.targets.orderTotal} ${session.targets.unitLabel}`}
+          />
           <DetailRow label="Boxes" value={`${session.targets.boxCount}`} />
         </View>
         <Button
@@ -503,12 +516,12 @@ export default function PackingScreen() {
       {/* Persistent counter — shown always, not only on error. */}
       <Card title={`Box ${boxNumber} of ${session.targets.boxCount}`}>
         <Text style={styles.counter}>
-          {bunchesInBox} of {session.targets.capBunches} bunches
+          {inBox} of {session.targets.capPerBox} {session.targets.unitLabel}
         </Text>
         <View style={styles.rows}>
           <DetailRow
             label="Order progress"
-            value={`${bunchesPacked} of ${session.targets.targetBunches} bunches`}
+            value={`${packedTotal} of ${session.targets.orderTotal} ${session.targets.unitLabel}`}
           />
           {/* Surfaced so a packer can sanity-check they have Bunch(10) and not
               Bunch(12): a wrong-size bunch passes both Rule 1 and Rule 3 today
@@ -574,7 +587,7 @@ export default function PackingScreen() {
       ) : null}
 
       <Text style={styles.hint}>
-        {bunchesPacked >= session.targets.targetBunches
+        {packedTotal >= session.targets.orderTotal
           ? 'Order fully packed. Change pick list to start another.'
           : 'Boxes advance automatically when the pack rate is reached.'}
       </Text>

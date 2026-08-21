@@ -691,6 +691,32 @@ Packers scan bunches and think in bunches, so **every number the packing screen 
 | `custom_packrate` | `4` | **per-box cap, IN THE LINE'S UOM** |
 | `custom_number_of_boxes` | `2` | box count — **authoritative, used directly** |
 
+**🔴 THE SO LINE'S UOM IS NOT ALWAYS BUNCHES — this blocked packers in the field.**
+
+`SAL-ORD-2026-01494` / `OPL-2026-02954`: `uom` **Stems**, `conversion_factor` 1, `qty` 1200, `custom_packrate` 200, `custom_number_of_boxes` 6. Those are **stems** — 20 bunches per box, 120 overall. The screen rendered "200 bunches" and "1200 bunches", so the cap was unreachable and the box could never close.
+
+**`conversion_factor` does not rescue this**: on a Stems line it is 1, not the bunch size. The bunch size must come from elsewhere.
+
+**Resolve `stemsPerBunch` in this order:**
+
+1. the OPL row's `uom`, if `Bunch(N)` → `N`
+2. the Sales Order's `custom_bunching`, `"X10"` → 10 (strip a leading `X`/`x`)
+3. neither → **count STEMS, label them "stems", and do NOT divide**
+
+Then:
+
+| SO line uom | cap per box | order total |
+|---|---|---|
+| `Bunch(N)` | `custom_packrate` **as-is** — already bunches, dividing would double-convert | `qty` as-is |
+| `Stems`, bunch size known | `custom_packrate / stemsPerBunch` | `qty × conversion_factor / stemsPerBunch` |
+| `Stems`, bunch size unknown | `custom_packrate` (stems) | `qty × conversion_factor` (stems) |
+
+`custom_number_of_boxes` is used directly in every case.
+
+**NEVER label a number "bunches" unless `stemsPerBunch` actually resolved.** The session carries a `unitLabel` and every rendered figure uses it; the per-scan increment is 1 when counting bunches and the scanned bunch's own stem count when counting stems.
+
+Pinned by `src/features/packing/targets.test.ts` against both live orders and both fallback tiers.
+
 **`custom_packrate` is expressed in the SO line's uom** — verified across two live orders: `Bunch(10)` with packrate 4 means four bunches; `Stems` with packrate 140 means 140 stems. Convert with `conversion_factor` only when the uom is stems.
 
 **`custom_number_of_boxes` is used directly rather than dividing.** It is already correct, and taking it avoids inventing a rounding rule for the trailing box.

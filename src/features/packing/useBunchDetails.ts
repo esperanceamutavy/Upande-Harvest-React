@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
+import { parseStemsPerBunch } from './targets';
 import type { BunchDetails } from '../../types/packing';
 
 // Resolves a scanned bunch id into everything the payload and Rule 3 need.
@@ -21,15 +22,6 @@ import type { BunchDetails } from '../../types/packing';
 // follow a `Name-NNCM` convention, and the client must match that.
 
 const variantParentCache = new Map<string, string>();
-
-/** The server's own paren rule. `"Bunch(10)"` → 10. */
-export function parseStemsPerBunch(bunchUom: string): number | null {
-  const open = bunchUom.indexOf('(');
-  const close = bunchUom.indexOf(')', open + 1);
-  if (open < 0 || close < 0) return null;
-  const n = Number.parseInt(bunchUom.slice(open + 1, close), 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
 
 async function getValue(
   doctype: string,

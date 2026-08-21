@@ -77,15 +77,27 @@ export interface OrderPickList {
 export interface SalesOrderTargets {
   salesOrder: string;
   itemCode: string | null;
-  /** The line's uom, e.g. `Bunch(10)` or `Stems`. */
+  /** The SO line's uom, e.g. `Bunch(10)` or `Stems`. */
   uom: string;
   conversionFactor: number;
   /** `stock_qty` — the order in stems. Display only. */
   stockQty: number;
-  /** `qty` converted to bunches. The order target. */
-  targetBunches: number;
-  /** `custom_packrate` converted to bunches. The per-box cap. */
-  capBunches: number;
+
+  /**
+   * Stems per bunch, resolved in order: the OPL row's `Bunch(N)` uom, then the
+   * Sales Order's `custom_bunching` (`"X10"` → 10). **Null when neither is
+   * available** — in which case the session counts in STEMS and nothing may be
+   * labelled "bunches".
+   */
+  stemsPerBunch: number | null;
+
+  /** What `capPerBox` and `orderTotal` are counted in. NEVER say "bunches"
+   *  unless `stemsPerBunch` actually resolved. */
+  unitLabel: 'bunches' | 'stems';
+  /** The per-box cap, in `unitLabel`. */
+  capPerBox: number;
+  /** The order target, in `unitLabel`. */
+  orderTotal: number;
   /** `custom_number_of_boxes`, taken directly. The M in "Box N of M". */
   boxCount: number;
 }
