@@ -61,6 +61,8 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
     if (isOpen) setMounted(true);
   }
 
+  console.log('[drawer] 5. AppDrawer render, isOpen =', isOpen, 'mounted =', mounted);
+
   useEffect(() => {
     if (isOpen) {
       Animated.spring(translateX, {

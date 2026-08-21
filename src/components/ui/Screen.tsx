@@ -149,7 +149,10 @@ export function Screen({
             </Pressable>
           ) : showMenu ? (
             <Pressable
-              onPress={openDrawer}
+              onPress={() => {
+                console.log('[drawer] 1. hamburger pressed');
+                openDrawer();
+              }}
               hitSlop={10}
               style={styles.menuBtn}
               accessibilityRole="button"
