@@ -833,7 +833,27 @@ Needs two things from whoever owns the paperwork: a new field on `Box Label`, an
 
 Recorded explicitly so that **shipping a label without a day code is a decision on record, not something discovered at an inspection.**
 
-**Closure has no trigger — STILL OPEN.**
+**✅ CLOSURE TRIGGER — RESOLVED. The PDF renders server-side on close.**
+
+The client sends `close_box: 1` and `close_box_number: <the box just completed>` on the scan whose count lands exactly on the cap — the one that fills the box. The response then carries:
+
+| Field | Meaning |
+|---|---|
+| `box_label` | the Box Label document name |
+| `box_label_pdf` | `file_url` of the rendered PDF, relative to the instance |
+| `box_label_pdf_error` | set INSTEAD of the pdf when the render failed |
+
+**A render failure is a WARNING, never a failed scan.** The pack itself succeeded — the bunch is in the box either way — so the client shows a `warn` Notice carrying both the close message and the error, and still logs the scan as packed.
+
+The PDF is surfaced as a tappable link in the box-full Notice **and kept on that box's session-log row**, so it stays reachable after the next scan clears the Notice. `file_url` is relative, so the client prefixes the instance URL before opening.
+
+#### ⚠️ KNOWN LIMITATION — a one-bunch box does not render
+
+**The render is wired into the UPDATE branch only.** A box closed by its very first bunch goes through `createOrUpdateFarmPackList`'s CREATE branch instead, and no label is produced. Rare — it needs a cap of one bunch, or the first bunch of a Farm Pack List that does not yet exist — but real, and it fails silently: no `box_label_pdf`, and no `box_label_pdf_error` either, so the client shows an ordinary close with no link rather than a warning.
+
+Backend fix: wire the same render into the CREATE branch. Recorded rather than worked around — a client-side retry would mean issuing a second write purely to move the document onto the update path.
+
+~~**Closure has no trigger — STILL OPEN.**~~ *(Superseded — see above.)*
 
 Every `createOrUpdateFarmPackList` call is an incremental add. Nothing anywhere signals *"this box is finished"* — there is no close endpoint (§8.3 deletions), no status on `Box Label`, and no field the client could set. So there is no event on which to render and attach the PDF.
 
@@ -910,7 +930,7 @@ Rule 3 is already correct for this case: it is expressed as a membership test ov
 - **Check against a LIVE OPL, not a snapshot one.** OPL ids in this plan are illustrative (§8.0) — the snapshot tops out at `OPL-2026-00900` while live is past `OPL-2026-02904`. Anything below only means something when re-read from the live site.
 - ~~**BLOCKING — summary-field corruption.**~~ **✅ FIXED 2026-08-20.** Three defects corrected live; writes are no longer corrupt. The retained analysis is now the post-fix verification shape. 16 pre-fix FPLs still carry wrong summaries — backfill is a separate decision.
 - ~~**BLOCKING — the `item_code` / `uom` convention mismatch.**~~ **✅ FIXED 2026-08-20.** It was a variant/template relation, not a naming error. The script is now variant-aware via `Item.variant_of` and the `uom` dimension is dropped from the warehouse match. Rule 3 is implemented client-side on the same relation.
-- **⛔ OPEN — box closure has no trigger.** Nothing signals that a box is complete, so there is no event on which to render the Box Label PDF. Backend affordance required; see the Box Label section. Gates the printable deliverable specifically.
+- ~~**OPEN — box closure has no trigger.**~~ **✅ RESOLVED.** The client sends `close_box` on the filling scan and the server renders the PDF; the client links it from the Notice and the session log. One limitation remains: a box closed by its FIRST bunch takes the CREATE branch and renders nothing, silently. See the Box Label section.
 - ~~**OPEN — what gets scanned into a `Stems`-uom OPL?**~~ **RESOLVED** — the paren parse reads the *payload's* `bunch_uom` (always `Bunch(N)` from the bunch record), not the OPL's, so such an OPL packs without throwing. It simply never matches a warehouse. Folded into the Rule 3 blocker above.
 - **The OPL picker excludes mixed-box OPLs at the query** (`custom_is_mixed_box_pick_list = 0`), since mix is deferred and offering one would strand a packer mid-box. No other exclusion is needed now the variant match is fixed.
 - **The silent warehouse fallback is Rule 3, and Rule 3 now mirrors the fixed server rule.** The `uom` dimension no longer participates in the match at all, so `Stems`-uom OPLs resolve their warehouse correctly — the format inconsistency between OPLs is now irrelevant rather than merely unresolved.
@@ -960,7 +980,9 @@ Phases 1–5 are self-contained and shippable on their own. Ship the restyle fir
 
 **Still open, neither blocking the screen:** the Box Label **closure trigger** (nothing signals a box complete, so there is no event to render the PDF on) and **Box Label field population** (six fields the print format renders but `sync_box_label` never sets, plus the missing KEPHIS day code). Both are backend workstreams; packing writes and scans correctly without them.
 
-**Still open, lower severity, neither blocking the screen:** the Box Label output workstream — six unset fields, a header `length` that cannot describe a real box, a **missing day code KEPHIS requires**, and **no closure trigger to render the PDF on**. All backend. The day-code omission in particular is recorded so that shipping without it is a decision rather than a surprise at inspection.
+**Still open, lower severity, neither blocking the screen:** the Box Label output workstream — six unset fields, a header `length` that cannot describe a real box, and a **missing day code KEPHIS requires**. All backend. The day-code omission in particular is recorded so that shipping without it is a decision rather than a surprise at inspection.
+
+The closure trigger is **resolved**: the client sends `close_box` on the filling scan and links the rendered PDF from both the Notice and the session log. One limitation stands — a box closed by its first bunch takes the CREATE branch and renders nothing, silently (§8.3).
 
 **Packing screen built 2026-08-20** (`src/app/(app)/packing.tsx`, drawer-only): OPL picker with a `Segmented` date window excluding mixed-box lists, a review card before any scanning, a persistent `Box N of M — n/cap stems` counter, and one request per bunch under `serializeByKey('packing')`. Needs a device check.
 

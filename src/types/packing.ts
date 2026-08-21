@@ -122,6 +122,10 @@ export interface PackBunchPayload {
   bunchUom: string;
   stemLength: string;
   boxId: number;
+  /** Set on the scan that fills a box: asks the server to render its label. */
+  closeBox?: boolean;
+  /** The box being closed. Sent only alongside `closeBox`. */
+  closeBoxNumber?: number;
 }
 
 export interface PackBunchResult {
@@ -131,6 +135,15 @@ export interface PackBunchResult {
   /** Populated only on batch submissions; we always send one bunch. */
   alreadyPacked: string[];
   newlyPacked: number | null;
+
+  // ── Present only on a close_box request ──────────────────────────────────
+  /** The Box Label document name. */
+  boxLabel: string | null;
+  /** `file_url` of the rendered PDF — relative to the instance. */
+  boxLabelPdf: string | null;
+  /** Set INSTEAD of the pdf when the render failed. The pack itself still
+   *  succeeded, so this is a warning, never a failed scan. */
+  boxLabelPdfError: string | null;
 }
 
 /** Why a scan was refused, so the screen can pick a tone and a message. */
@@ -152,4 +165,7 @@ export interface PackEntry {
   rejection: PackRejection | null;
   detail: string;
   time: string;
+  /** Box label PDF for the box this scan closed. Kept on the row so it stays
+   *  reachable after the next scan clears the Notice. */
+  pdfUrl?: string | null;
 }

@@ -37,6 +37,11 @@ async function packBunch(p: PackBunchPayload): Promise<PackBunchResult> {
             bunch_qty: 1,
           },
         ],
+        // Asks the server to render the Box Label PDF for the box this scan
+        // just filled. Sent only on that scan.
+        ...(p.closeBox
+          ? { close_box: 1, close_box_number: p.closeBoxNumber ?? p.boxId }
+          : {}),
       },
     );
 
@@ -59,6 +64,10 @@ async function packBunch(p: PackBunchPayload): Promise<PackBunchResult> {
       docname: payload.docname != null ? String(payload.docname) : null,
       alreadyPacked,
       newlyPacked: payload.newly_packed != null ? Number(payload.newly_packed) : null,
+      boxLabel: payload.box_label != null ? String(payload.box_label) : null,
+      boxLabelPdf: payload.box_label_pdf != null ? String(payload.box_label_pdf) : null,
+      boxLabelPdfError:
+        payload.box_label_pdf_error != null ? String(payload.box_label_pdf_error) : null,
     };
   });
 }

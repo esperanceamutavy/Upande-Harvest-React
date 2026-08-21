@@ -1,5 +1,13 @@
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { QrCode } from 'lucide-react-native';
 
 import { useOplList } from '../../features/packing/useOplList';
@@ -16,6 +24,7 @@ import { playBeep, playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
 import { extractFrappeError } from '../../lib/api';
 import { extractScannedId } from '../../lib/qr';
+import { useAuthStore } from '../../stores/auth';
 import { Button } from '../../components/ui/Button';
 import { Card, Notice, type NoticeTone } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
@@ -56,7 +65,7 @@ const DATE_OPTIONS = [
   { value: 'all', label: 'All time' },
 ] as const satisfies readonly { value: OplDateFilter; label: string }[];
 
-type FeedbackMsg = { tone: NoticeTone; text: string };
+type FeedbackMsg = { tone: NoticeTone; text: string; pdfUrl?: string | null };
 
 const REJECTION_TONE: Record<PackRejection, NoticeTone> = {
   'duplicate-in-session': 'warn',
@@ -70,6 +79,9 @@ const REJECTION_TONE: Record<PackRejection, NoticeTone> = {
 };
 
 export default function PackingScreen() {
+  // `file_url` comes back relative to the instance, so it needs the base URL to
+  // be openable.
+  const instanceUrl = useAuthStore((st) => st.instanceUrl);
   const [range, setRange] = useState<OplDateFilter>('today');
   const oplList = useOplList(range);
   const oplMut = useOrderPickList();
@@ -113,6 +125,18 @@ export default function PackingScreen() {
     setTimeout(() => {
       isSettingProgrammaticallyRef.current = false;
     }, 0);
+  }
+
+  /** Frappe returns `file_url` relative to the site; make it openable. */
+  function absoluteFileUrl(fileUrl: string): string | null {
+    if (/^https?:\/\//i.test(fileUrl)) return fileUrl;
+    if (!instanceUrl) return null;
+    return `${instanceUrl.replace(/\/+$/, '')}${fileUrl.startsWith('/') ? '' : '/'}${fileUrl}`;
+  }
+
+  function openPdf(fileUrl: string) {
+    const url = absoluteFileUrl(fileUrl);
+    if (url) void Linking.openURL(url);
   }
 
   function logEntry(entry: Omit<PackEntry, 'id' | 'time'>) {
@@ -260,6 +284,12 @@ export default function PackingScreen() {
         return;
       }
 
+      // Known BEFORE the request, because the payload has to carry it: this
+      // scan closes the box when its count lands exactly on the cap.
+      const cap = s.targets.capBunches;
+      const boxClosed = plan.bunchesAfter >= cap;
+      const lastBox = plan.boxId >= s.targets.boxCount;
+
       const res = await packMut.mutateAsync({
         salesOrder: s.opl.salesOrder!,
         customer: s.opl.customer,
@@ -270,6 +300,8 @@ export default function PackingScreen() {
         bunchUom: bunch.bunchUom,
         stemLength: bunch.stemLength,
         boxId: plan.boxId,
+        closeBox: boxClosed,
+        closeBoxNumber: boxClosed ? plan.boxId : undefined,
       });
 
       // already_packed[] only populates on batch submissions — we send one bunch,
@@ -287,14 +319,9 @@ export default function PackingScreen() {
       setBunchesPacked((prev) => prev + 1);
 
       // ── Box-full announcement ────────────────────────────────────────────
-      // This scan CLOSED the box when it lands exactly on the cap. The counter
-      // card advances on its own; this is the announcement, not the mechanism.
-      // It stays on screen until the next scan clears it — a packer looking
-      // down at the flowers needs it still there when they look up.
-      const cap = s.targets.capBunches;
-      const boxClosed = plan.bunchesAfter >= cap;
-      const lastBox = plan.boxId >= s.targets.boxCount;
-
+      // The counter card advances on its own; this is the announcement, not the
+      // mechanism. It stays on screen until the next scan clears it — a packer
+      // looking down at the flowers needs it there when they look up.
       playSubmit();
       if (boxClosed) {
         // Second cue on top of the usual submit sound, so a closed box is
@@ -304,14 +331,26 @@ export default function PackingScreen() {
         haptics.heavy();
       }
 
-      setFeedback({
-        tone: 'success',
-        text: boxClosed
-          ? lastBox
-            ? `Box ${plan.boxId} of ${s.targets.boxCount} complete — order fully packed.`
-            : `Box ${plan.boxId} of ${s.targets.boxCount} complete — ${plan.bunchesAfter} of ${cap} bunches. Starting Box ${plan.boxId + 1}.`
-          : `Box ${plan.boxId} — ${plan.bunchesAfter} of ${cap} bunches · ${bunch.itemCode} ${bunch.stemLength}`,
-      });
+      const closeText = lastBox
+        ? `Box ${plan.boxId} of ${s.targets.boxCount} complete — order fully packed.`
+        : `Box ${plan.boxId} of ${s.targets.boxCount} complete — ${plan.bunchesAfter} of ${cap} bunches. Starting Box ${plan.boxId + 1}.`;
+
+      if (boxClosed && res.boxLabelPdfError) {
+        // The PACK succeeded; only the label render failed. Warn, never a
+        // failed scan — the bunch is in the box either way.
+        setFeedback({
+          tone: 'warn',
+          text: `${closeText} Label PDF failed: ${res.boxLabelPdfError}`,
+        });
+      } else if (boxClosed) {
+        setFeedback({ tone: 'success', text: closeText, pdfUrl: res.boxLabelPdf });
+      } else {
+        setFeedback({
+          tone: 'success',
+          text: `Box ${plan.boxId} — ${plan.bunchesAfter} of ${cap} bunches · ${bunch.itemCode} ${bunch.stemLength}`,
+        });
+      }
+
       logEntry({
         bunchId,
         boxId: plan.boxId,
@@ -319,7 +358,12 @@ export default function PackingScreen() {
         rejection: null,
         detail: `${bunch.itemCode} ${bunch.stemLength} · ${bunch.bunchUom}${
           res.docname ? ` · ${res.docname}` : ''
-        }${boxClosed ? ` · closed Box ${plan.boxId}` : ''}`,
+        }${boxClosed ? ` · closed Box ${plan.boxId}` : ''}${
+          res.boxLabelPdfError ? ` · label render failed` : ''
+        }`,
+        // Kept on the row so the label stays reachable once the next scan
+        // clears the Notice.
+        pdfUrl: res.boxLabelPdf,
       });
       setBunchProgrammatic('');
       bunchRef.current?.focus();
@@ -497,13 +541,22 @@ export default function PackingScreen() {
         ) : null}
       </Card>
 
-      {feedback ? <Notice tone={feedback.tone}>{feedback.text}</Notice> : null}
+      {feedback ? (
+        <Notice tone={feedback.tone}>
+          {feedback.text}
+          {feedback.pdfUrl ? (
+            <Text style={styles.link} onPress={() => openPdf(feedback.pdfUrl!)}>
+              {'  '}Open box label PDF
+            </Text>
+          ) : null}
+        </Notice>
+      ) : null}
 
       {entries.length > 0 ? (
         <Card title="This session">
           <View style={styles.log}>
             {entries.map((entry) => (
-              <EntryRow key={entry.id} entry={entry} />
+              <EntryRow key={entry.id} entry={entry} onOpenPdf={openPdf} />
             ))}
           </View>
         </Card>
@@ -571,7 +624,13 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 // Three visual states: packed, a benign refusal (re-scan) in amber, and a
 // genuine fault in red. A full order is red — it means stop, not retry.
-function EntryRow({ entry }: { entry: PackEntry }) {
+function EntryRow({
+  entry,
+  onOpenPdf,
+}: {
+  entry: PackEntry;
+  onOpenPdf: (fileUrl: string) => void;
+}) {
   const benign =
     entry.rejection === 'duplicate-in-session' || entry.rejection === 'already-packed';
   const tint = entry.status === 'packed' ? null : benign ? styles.logWarn : styles.logError;
@@ -590,6 +649,11 @@ function EntryRow({ entry }: { entry: PackEntry }) {
       <Text style={[styles.logDetail, tint]} numberOfLines={3}>
         {entry.detail}
       </Text>
+      {entry.pdfUrl ? (
+        <Text style={styles.link} onPress={() => onOpenPdf(entry.pdfUrl!)}>
+          Open box label PDF
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -676,4 +740,5 @@ const styles = StyleSheet.create({
   logDetail: { fontSize: 13, color: colors.textSecondary },
   logWarn: { color: colors.warning },
   logError: { color: colors.error },
+  link: { fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
 });
