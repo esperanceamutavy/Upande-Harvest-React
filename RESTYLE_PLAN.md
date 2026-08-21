@@ -80,6 +80,27 @@ Port `packhouse/src/core/ui/Screen.tsx` with these changes:
 
 Port `Card` and `Alert` as-is; `Card`'s title uses the new `typography.eyebrow`.
 
+#### AppDrawer — hoisted, and a known cosmetic issue
+
+`AppDrawer` is mounted **once**, by `(app)/_layout.tsx`, with open/close state in `features/navigation/drawerContext.tsx`. `Screen`'s hamburger and the dashboard's both call `openDrawer()`; neither renders its own instance. `useDrawer()` **throws** when the provider is missing rather than returning a no-op — a silent no-op previously made a wiring bug look like a styling one and cost a full diagnostic round.
+
+**It must be a `Modal`.** An in-tree absolutely-positioned overlay was tried and reverted. *(Note the revert was made for the wrong reason — z-order was blamed, but the real cause was the reset below. Whether the overlay would work is therefore untested; it is not worth reopening unless drawer-open latency becomes a problem, since `Modal`'s per-open native window is the remaining cost.)*
+
+**Visibility is `isOpen || mounted`, deliberately.** `isOpen` alone is sufficient to show the drawer, so no animation-callback ordering can hide one the user asked for. `mounted` only extends visibility *past* `isOpen` going false, so the slide-out is seen. This is structural — it removes the race rather than trying to win it.
+
+> **🟡 KNOWN COSMETIC ISSUE — the closing slide-out is skipped. Do not re-derive this.**
+>
+> Something resets `mounted` to `false` ~44ms after the drawer opens, while `isOpen` is still `true`. Because `visible` is `isOpen || mounted`, the drawer opens and closes correctly regardless — but `mounted` is already `false` at close time, so `visible` drops instantly and the panel vanishes rather than sliding.
+>
+> **What the device trace established, so it need not be repeated:**
+> - the AppDrawer instance id is **stable** across the whole trace — it is a state reset, **not a remount**
+> - the close-animation callback **never fires** on open; the `cancelled` guard works and correctly suppresses it
+> - `mounted` drops **1ms after the effect cleanup logs**, which itself runs ~43ms after the open render
+>
+> So the reset comes from the **cleanup path or the render-phase derivation**, not the animation callback. The remaining suspects are narrow: something re-running the effect with a stale `isOpen`, or the `prevOpen`/`mounted` derivation being re-entered after a state update elsewhere in the component.
+>
+> Left alone on purpose — the drawer works, and the cost is one missing exit animation. Worth fixing only if the close reads badly in the field.
+
 **Verify:** `Screen` renders standalone on a throwaway route before any migration.
 
 ## 5. Phase 3 — migrate the five screens

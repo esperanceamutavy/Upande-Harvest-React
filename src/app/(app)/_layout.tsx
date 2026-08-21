@@ -82,7 +82,6 @@ function AppTabs() {
 // <Tabs>, so it paints above the tab bar without a native Modal window.
 function DrawerHost() {
   const { isOpen, closeDrawer } = useDrawer();
-  console.log('[drawer] 4. DrawerHost render, isOpen =', isOpen);
   return <AppDrawer isOpen={isOpen} onClose={closeDrawer} />;
 }
 

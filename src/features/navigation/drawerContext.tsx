@@ -27,13 +27,8 @@ const DrawerContext = createContext<DrawerControls | null>(null);
 export function DrawerProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const openDrawer = useCallback(() => {
-    console.log('[drawer] 2. openDrawer() called → setIsOpen(true)');
-    setIsOpen(true);
-  }, []);
+  const openDrawer = useCallback(() => setIsOpen(true), []);
   const closeDrawer = useCallback(() => setIsOpen(false), []);
-
-  console.log('[drawer] 3. DrawerProvider render, isOpen =', isOpen);
 
   // Memoised so consumers of the context do not re-render on every provider
   // render — the provider sits above the whole tab navigator.
