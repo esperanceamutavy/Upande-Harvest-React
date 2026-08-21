@@ -21,6 +21,11 @@ import { colors, fontFamily, fontSize, radii, spacing } from './ui/theme';
 
 const DRAWER_WIDTH = Math.min(Dimensions.get('window').width * 0.75, 320);
 
+// Proves which bundle the device is actually running. Bump on every change to
+// this file while diagnosing.
+const BUILD = 'drawer-build-3';
+console.log('[drawer] BUILD', BUILD, 'module loaded');
+
 interface AppDrawerProps {
   isOpen: boolean;
   onClose: () => void;
@@ -49,6 +54,10 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
   // Lazy useState, not `useRef(...).current` — React 19's react-hooks rules
   // reject reading a ref during render. Same fix as Segmented.tsx.
   const [translateX] = useState(() => new Animated.Value(-DRAWER_WIDTH));
+  // A fresh id per MOUNT. If the id changes across the trace, AppDrawer is
+  // being remounted rather than having its state reset — a different bug with
+  // a different fix.
+  const [iid] = useState(() => Math.random().toString(36).slice(2, 7));
 
   // `mounted` outlives `isOpen` by one animation so the panel can slide out
   // before it unmounts. Opening flips it during render rather than from an
@@ -61,7 +70,9 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
     if (isOpen) setMounted(true);
   }
 
-  console.log('[drawer] 5. AppDrawer render, isOpen =', isOpen, 'mounted =', mounted);
+  console.log(
+    `[drawer] 5. AppDrawer[${iid}] render, isOpen = ${isOpen}, mounted = ${mounted}`,
+  );
 
   // `mounted` may ONLY go false from a close that (a) ran with isOpen false and
   // (b) was not superseded by a reopen before it resolved.
@@ -90,19 +101,26 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
         duration: 200,
         useNativeDriver: true,
       }).start(({ finished }) => {
+        console.log(
+          `[drawer] 6. AppDrawer[${iid}] close-cb finished=${finished} cancelled=${cancelled} closureIsOpen=${isOpen}`,
+        );
         // `finished` alone is not enough — it is also true for a close that
         // completed after a reopen had already been requested.
-        if (finished && !cancelled) setMounted(false);
+        if (finished && !cancelled) {
+          console.log(`[drawer] 7. AppDrawer[${iid}] setMounted(false) FROM close-cb`);
+          setMounted(false);
+        }
       });
     }
 
     return () => {
+      console.log(`[drawer] 8. AppDrawer[${iid}] cleanup, closureIsOpen=${isOpen}`);
       cancelled = true;
       // Stop the in-flight animation so a superseded run cannot resolve later
       // and fight the one that replaced it.
       translateX.stopAnimation();
     };
-  }, [isOpen, translateX]);
+  }, [isOpen, translateX, iid]);
 
   function navigate(route: string) {
     onClose();
@@ -136,18 +154,22 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
 
   const initial = fullName && fullName.length > 0 ? fullName[0].toUpperCase() : 'U';
 
-  // `visible` is driven by `mounted`, NOT `isOpen`, so the Modal stays up for
-  // the 200ms slide-out before hiding. Binding it to `isOpen` would unmount
-  // instantly and the close animation would never be seen.
+  // `isOpen || mounted` — the invariant is STRUCTURAL, not a race to be won.
   //
-  // On the mount gate: it cannot keep the subtree alive between opens, because
-  // RN's Modal returns null from its own render when hidden — the children
-  // unmount either way. So the gate now earns its place purely by preserving
-  // the exit animation. The explicit `if (!mounted) return null` is gone as
-  // redundant; `visible` does that job with one mechanism instead of two.
+  //   isOpen  → must be visible, full stop. No callback ordering, no animation
+  //             timing, and no stray setMounted(false) can hide a drawer the
+  //             user has asked for.
+  //   mounted → keeps it alive PAST isOpen going false, so the slide-out is
+  //             seen before the Modal hides. That is now mounted's only job.
+  //
+  // This replaces driving visibility from `mounted` alone, which made the
+  // drawer's appearance depend on an animation callback resolving in the right
+  // order — and it did not.
+  const visible = isOpen || mounted;
+
   return (
     <Modal
-      visible={mounted}
+      visible={visible}
       transparent
       animationType="none"
       statusBarTranslucent
