@@ -22,7 +22,16 @@ import { borderRadius, colors, fontFamily, fontSize } from './theme';
 interface SegmentedOption<T extends string> {
   value: T;
   label: string;
+  /** Used instead of `label` when the measured segment is too narrow for it.
+   *  Lets a caller write the clearer label and degrade rather than clip. */
+  shortLabel?: string;
 }
+
+// Rough advance width per character at `fontSize.sm` in the medium weight. Only
+// used to decide between two labels, so an approximation is fine — the input it
+// matters against, `segmentWidth`, is really measured.
+const CHAR_WIDTH = 7.2;
+const LABEL_PADDING = 8;
 
 interface SegmentedProps<T extends string> {
   value: T;
@@ -87,6 +96,11 @@ export function Segmented<T extends string>({
 
       {options.map((opt) => {
         const active = opt.value === value;
+        // Before layout `segmentWidth` is 0; show the full label then, so the
+        // intended text wins whenever there is any doubt.
+        const tooNarrow =
+          segmentWidth > 0 && opt.label.length * CHAR_WIDTH > segmentWidth - LABEL_PADDING;
+        const label = tooNarrow && opt.shortLabel ? opt.shortLabel : opt.label;
         return (
           <Pressable
             key={opt.value}
@@ -96,7 +110,7 @@ export function Segmented<T extends string>({
             style={styles.btn}
           >
             <Text style={[styles.label, active && styles.labelActive]} numberOfLines={1}>
-              {opt.label}
+              {label}
             </Text>
           </Pressable>
         );

@@ -58,12 +58,22 @@ import type {
 
 const MAX_LOG_ROWS = 12;
 
+// "Today" would be wrong: the range is today AND tomorrow, because packers pack
+// today for tomorrow's flight. Anything implying urgency ("Due now") would read
+// as overdue, which is the opposite of a forward-looking window.
+//
+// Four options across a phone leaves little room, so the long label degrades to
+// the short one when the measured segment cannot hold it, rather than clipping.
 const DATE_OPTIONS = [
-  { value: 'today', label: 'Today' },
+  { value: 'today', label: 'Today + tomorrow', shortLabel: 'Next 2 days' },
   { value: 'yesterday', label: 'Yesterday' },
   { value: 'week', label: 'This week' },
   { value: 'all', label: 'All time' },
-] as const satisfies readonly { value: OplDateFilter; label: string }[];
+] as const satisfies readonly {
+  value: OplDateFilter;
+  label: string;
+  shortLabel?: string;
+}[];
 
 type FeedbackMsg = { tone: NoticeTone; text: string; pdfUrl?: string | null };
 
