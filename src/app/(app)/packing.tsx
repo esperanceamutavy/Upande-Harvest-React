@@ -417,16 +417,17 @@ export default function PackingScreen() {
           </View>
         ) : oplList.error ? (
           <Notice tone="danger">{extractFrappeError(oplList.error)}</Notice>
-        ) : (oplList.data ?? []).length === 0 ? (
+        ) : (oplList.data?.items ?? []).length === 0 ? (
           <Card title="No pick lists">
             <Text style={styles.body}>
-              Nothing for this period. Try a wider date range — mixed-box pick lists are excluded.
+              {oplList.data?.notice ??
+                'No pick lists for orders due in this window. Try a wider range — mixed-box pick lists are excluded.'}
             </Text>
           </Card>
         ) : (
-          <Card title={`${oplList.data!.length} pick lists`}>
+          <Card title={`${oplList.data!.items.length} pick lists`}>
             <View style={styles.list}>
-              {oplList.data!.map((item) => (
+              {oplList.data!.items.map((item) => (
                 <OplPickerRow
                   key={item.name}
                   item={item}
@@ -600,7 +601,9 @@ function OplPickerRow({
         <Text style={styles.pickerName} numberOfLines={1}>
           {item.name}
         </Text>
-        <Text style={styles.pickerDate}>{item.dateCreated ?? ''}</Text>
+        <Text style={styles.pickerDate}>
+          {item.deliveryDate ? `Due ${item.deliveryDate}` : ''}
+        </Text>
       </View>
       <Text style={styles.pickerMeta} numberOfLines={1}>
         {[item.customer, item.boxType, item.totalUnits ? `${item.totalUnits} per order` : null]

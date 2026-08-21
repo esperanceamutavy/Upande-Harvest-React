@@ -966,6 +966,13 @@ Rule 3 is already correct for this case: it is expressed as a membership test ov
 - ~~**OPEN — box closure has no trigger.**~~ **✅ RESOLVED.** The client sends `close_box` on the filling scan and the server renders the PDF; the client links it from the Notice and the session log. One limitation remains: a box closed by its FIRST bunch takes the CREATE branch and renders nothing, silently. See the Box Label section.
 - ~~**OPEN — what gets scanned into a `Stems`-uom OPL?**~~ **RESOLVED** — the paren parse reads the *payload's* `bunch_uom` (always `Bunch(N)` from the bunch record), not the OPL's, so such an OPL packs without throwing. It simply never matches a warehouse. Folded into the Rule 3 blocker above.
 - **The OPL picker excludes mixed-box OPLs at the query** (`custom_is_mixed_box_pick_list = 0`), since mix is deferred and offering one would strand a packer mid-box. No other exclusion is needed now the variant match is fixed.
+- **The picker filters on the Sales Order's `delivery_date`, not the OPL's `date_created`** — a packer cares when the flowers fly, not when the pick list was generated. An OPL has no delivery date of its own, only a `sales_order` link, so it is two calls: submitted Sales Orders due in the window, then the OPLs pointing at them. The delivery date is shown on every picker row, since it is what the filter now means.
+
+  Two things that must not regress:
+  - **An empty step-1 result short-circuits.** Frappe treats an empty `in` list as no filter at all, so falling through would return *every* OPL ever created — the exact opposite of the window asked for. The picker shows "No orders due in this window" instead.
+  - **"All time" skips step 1 entirely** and queries OPLs unfiltered. Building an `in` list of every Sales Order would blow up the URL. Delivery dates are back-filled afterwards from the returned OPLs' own `sales_order` values, which is a bounded list.
+
+  Ranges are all on `delivery_date`: **Today = today AND tomorrow** (packers pack today for tomorrow's flight), Yesterday, Monday–Sunday of the current week, and All time. Dates are built from local calendar parts — `toISOString()` rolls the day backwards in EAT.
 - **The silent warehouse fallback is Rule 3, and Rule 3 now mirrors the fixed server rule.** The `uom` dimension no longer participates in the match at all, so `Stems`-uom OPLs resolve their warehouse correctly — the format inconsistency between OPLs is now irrelevant rather than merely unresolved.
 - **The doctype is spelled `Order Pick LIst`** — capital `I`. That typo is the actual doctype name; any direct query must reproduce it.
 - The OPL must have `item_locations`, or the call throws `Order Pick List has no location entries defined`.

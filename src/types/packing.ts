@@ -33,7 +33,16 @@ export interface OplListItem {
   /** `custom_total_stems`. Not reliably stems — see `OrderPickList.totalUnits`. */
   totalUnits: string | null;
   boxType: string | null;
-  dateCreated: string | null;
+  /** The Sales Order's `delivery_date`. This is what the picker filters on, so
+   *  it is shown on every row. Null only if the SO lookup came back without one. */
+  deliveryDate: string | null;
+}
+
+export interface OplListResult {
+  items: OplListItem[];
+  /** Set when the delivery window matched no Sales Orders at all — distinct
+   *  from "orders exist but none have a pick list". */
+  notice: string | null;
 }
 
 /** An OPL loaded for a packing session. */
