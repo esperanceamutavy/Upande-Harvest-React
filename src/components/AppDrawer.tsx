@@ -63,7 +63,20 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
 
   console.log('[drawer] 5. AppDrawer render, isOpen =', isOpen, 'mounted =', mounted);
 
+  // `mounted` may ONLY go false from a close that (a) ran with isOpen false and
+  // (b) was not superseded by a reopen before it resolved.
+  //
+  // Both conditions are load-bearing. Without (b) the drawer never opened: at
+  // app start isOpen is false, so this effect immediately starts a close
+  // animation — and because translateX is ALREADY at -DRAWER_WIDTH there is no
+  // distance to travel, so with the native driver it resolves in about one
+  // bridge round-trip (~28ms observed) rather than the nominal 200ms. That
+  // callback then fired setMounted(false) with isOpen already true, unmounting
+  // the Modal before it could present. `cancelled` is flipped by the cleanup on
+  // the way into the reopen, so a superseded close can no longer unmount.
   useEffect(() => {
+    let cancelled = false;
+
     if (isOpen) {
       Animated.spring(translateX, {
         toValue: 0,
@@ -77,9 +90,18 @@ export function AppDrawer({ isOpen, onClose }: AppDrawerProps) {
         duration: 200,
         useNativeDriver: true,
       }).start(({ finished }) => {
-        if (finished) setMounted(false);
+        // `finished` alone is not enough — it is also true for a close that
+        // completed after a reopen had already been requested.
+        if (finished && !cancelled) setMounted(false);
       });
     }
+
+    return () => {
+      cancelled = true;
+      // Stop the in-flight animation so a superseded run cannot resolve later
+      // and fight the one that replaced it.
+      translateX.stopAnimation();
+    };
   }, [isOpen, translateX]);
 
   function navigate(route: string) {
