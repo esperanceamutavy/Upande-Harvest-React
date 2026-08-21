@@ -78,6 +78,7 @@ async function getResource(
   fields: string[],
   filters: Filter[],
   orderBy?: string,
+  extraParams?: Record<string, string>,
 ): Promise<Record<string, unknown>[]> {
   const res = await apiClient.get<{ data?: Record<string, unknown>[] }>(
     `/api/resource/${encodeURIComponent(doctype)}`,
@@ -87,6 +88,7 @@ async function getResource(
         filters: JSON.stringify(filters),
         ...(orderBy ? { order_by: orderBy } : {}),
         limit_page_length: 0,
+        ...extraParams,
       },
     },
   );
@@ -131,10 +133,19 @@ async function fetchContents(oplNames: string[]): Promise<Map<string, Contents>>
   const byOpl = new Map<string, Contents>();
   if (oplNames.length === 0) return byOpl;
 
+  // `parent=Order Pick LIst` is REQUIRED. Pick List Item is a child doctype
+  // (istable=1), and Frappe refuses /api/resource queries against child tables
+  // unless the request names the parent — it answers PermissionError even when
+  // the user can read the parent perfectly well. Not a role problem.
+  //
+  // Note the capital I in "Order Pick LIst": that typo is the real doctype name
+  // and the query fails without it.
   const rows = await getResource(
     'Pick List Item',
     ['parent', 'item_code', 'custom_stem_length', 'qty'],
     [['parent', 'in', oplNames]],
+    undefined,
+    { parent: 'Order Pick LIst' },
   );
 
   const seenVariety = new Map<string, Set<string>>();
