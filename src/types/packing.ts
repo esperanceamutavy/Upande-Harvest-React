@@ -66,8 +66,11 @@ export interface OplListItem {
   // ── Contents summary, so a packer can tell OPLs apart without opening each ──
   /** Distinct varieties on the pick list. */
   varieties: string[];
-  /** Distinct stem lengths. */
+  /** Distinct stem lengths on the OPL — the ALLOCATION, used only as a display
+   *  fallback. Prefer `orderLength`. */
   lengths: string[];
+  /** The ORDER's length, from the SO line's `item_code` suffix. */
+  orderLength: string | null;
   /** Total bunches across every row. */
   bunches: number;
 }
@@ -120,6 +123,10 @@ export interface SalesOrderTargets {
   /** `custom_customer_code` from the matched SO LINE — the header field of the
    *  same name is usually blank. Shaped `"<customer>-<code>"`. */
   customerCode: string | null;
+  /** The ORDER's stem length, from `item_code`'s suffix ("Brinessa-50CM" ->
+   *  "50CM"). Longer stems are cut down to this during packing, so it is the
+   *  headline length and the floor for Rule 3 — not the OPL's allocation. */
+  orderLength: string | null;
   /** `custom_truck_details` — Sales Order header. */
   truckDetails: string | null;
   /** `custom_consignee` — Sales Order header. Box Label carries it too. */

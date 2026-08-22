@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
 import { groupRowsByBox } from './boxProgress';
+import { orderLengthFromItemCode } from './lengths';
 import type { OplListItem, OplListResult, OplDateFilter, PackStatus } from '../../types/packing';
 
 // The OPL picker's source. There is no `list_open_opls_for_packing` endpoint on
@@ -254,6 +255,8 @@ interface Identity {
   codeByOpl: Map<string, string>;
   /** `custom_number_of_boxes`, keyed by OPL name. */
   boxesByOpl: Map<string, number>;
+  /** The order's own length, keyed by OPL name. */
+  lengthByOpl: Map<string, string>;
 }
 
 /** Packer-facing identity for every listed OPL, in BULK — never per OPL.
@@ -267,7 +270,8 @@ async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Ide
   const consigneeBySo = new Map<string, string>();
   const codeByOpl = new Map<string, string>();
   const boxesByOpl = new Map<string, number>();
-  if (soNames.length === 0) return { consigneeBySo, codeByOpl, boxesByOpl };
+  const lengthByOpl = new Map<string, string>();
+  if (soNames.length === 0) return { consigneeBySo, codeByOpl, boxesByOpl, lengthByOpl };
 
   const [headers, lines] = await Promise.all([
     getResource(SO_DOCTYPE, ['name', 'custom_consignee'], [['name', 'in', soNames]]),
@@ -275,7 +279,7 @@ async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Ide
     // Frappe answers PermissionError — same rule as Pick List Item below.
     getResource(
       'Sales Order Item',
-      ['parent', 'custom_opl', 'custom_customer_code', 'custom_number_of_boxes'],
+      ['parent', 'custom_opl', 'custom_customer_code', 'custom_number_of_boxes', 'item_code'],
       [
         ['parent', 'in', soNames],
         ['custom_opl', 'in', oplNames],
@@ -298,9 +302,13 @@ async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Ide
     if (code) codeByOpl.set(opl, code);
     const boxes = Number(r.custom_number_of_boxes ?? 0) || 0;
     if (boxes > 0) boxesByOpl.set(opl, boxes);
+    const length = orderLengthFromItemCode(
+      r.item_code != null ? String(r.item_code) : null,
+    );
+    if (length) lengthByOpl.set(opl, length);
   }
 
-  return { consigneeBySo, codeByOpl, boxesByOpl };
+  return { consigneeBySo, codeByOpl, boxesByOpl, lengthByOpl };
 }
 
 function toItem(
@@ -326,6 +334,7 @@ function toItem(
     packStatus: packState.get(String(r.name ?? ''))?.status ?? 'to_pack',
     boxesPacked: packState.get(String(r.name ?? ''))?.boxesPacked ?? 0,
     boxesTotal: identity.boxesByOpl.get(String(r.name ?? '')) ?? 0,
+    orderLength: identity.lengthByOpl.get(String(r.name ?? '')) ?? null,
   };
 }
 

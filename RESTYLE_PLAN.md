@@ -812,6 +812,27 @@ Since the client always sends `Bunch(N)` from the `Bunch QR Code` record, the pa
 
 This folds into Rule 3's blocker above rather than being a separate question: both are the same failure, reached through different dimensions of the same match.
 
+#### ⚠️ Rule 3's length check is LENGTH-OR-LONGER, and that is an accepted risk
+
+**Longer stems are allocated and cut DOWN during packing.** `SAL-ORD-2026-01540`'s line `Brinessa-50CM` points at `OPL-2026-03106`, whose `item_locations` are entirely 60CM and 70CM — the box ends up holding 50CM, and 50CM is what goes on the label. A packer may equally grab a 50CM bunch for the same order.
+
+So Rule 3 no longer tests length membership against `item_locations`, which blocked both of those legitimate cases. A bunch is valid when:
+
+- its **variety** matches the OPL (via `Item.variant_of`) — unchanged, and it is what stops a Madam Red bunch entering a Brinessa box
+- its **length is ≥ the ORDER's length**, parsed numerically from the SO line's `item_code` suffix, since the line has no length field
+
+Only SHORTER is refused: *"40CM is shorter than this order's 50CM. Pick 50CM or longer."* An unparseable length on either side **allows** the scan and logs — a format surprise must not stop a packer mid-shift.
+
+**Displayed lengths follow the order too.** The detail card's headline and the picker's variety line show the order's length; the per-row shelf list keeps each bunch's own length, since that is what a packer reads off the shelf label when picking.
+
+> **🔴 ACCEPTED RISK — a warehouse fallback that Rule 3 used to mask.**
+>
+> The server resolves `source_warehouse` by matching `item_code` + `custom_stem_length` against `item_locations`, and on no match falls back **silently** to `item_locations[0].warehouse`. The old membership check happened to stop such a scan before it posted.
+>
+> Relaxing the rule means a valid 50CM scan against a 60CM allocation now takes that fallback. **Harmless on a single-warehouse OPL — both live examples are — but a real hole on a multi-warehouse one**, where stock would be drawn from the wrong warehouse with nothing said.
+>
+> **The proper fix is server-side:** match on variety and length-or-longer there too, rather than exact length. Until then the client cannot close this without also re-blocking the legitimate cut-down case.
+
 #### `bunch_uom` comes from the bunch, never from the order
 
 | Source | Field | Value | Format |

@@ -15,6 +15,7 @@ import { useOrderPickList } from '../../features/packing/useOrderPickList';
 import { useSalesOrderTargets } from '../../features/packing/useSalesOrderTargets';
 import { useExistingPack } from '../../features/packing/useExistingPack';
 import { formatBoxRanges, resumePlan } from '../../features/packing/resume';
+import { compareLength, displayLength } from '../../features/packing/lengths';
 import { useBunchDetails } from '../../features/packing/useBunchDetails';
 import {
   classifyPackError,
@@ -324,18 +325,44 @@ export default function PackingScreen() {
     setFeedback(null);
   }
 
-  /** Rule 3 — variety AND stem length must both match a row on this OPL. */
+  /**
+   * Rule 3 — right variety, and long enough.
+   *
+   * VARIETY is still membership against `item_locations`: that is what stops a
+   * Madam Red bunch going into a Brinessa box. The OPL holds the Item TEMPLATE
+   * ("Monza") while the bunch holds the VARIANT ("Monza-50CM"), so either form
+   * is accepted, resolved via Item.variant_of rather than by parsing the code.
+   *
+   * LENGTH is no longer membership. Longer stems are allocated and cut DOWN
+   * during packing, so an OPL allocated 60/70CM legitimately fills a 50CM
+   * order, and a packer may equally grab a 50CM bunch for it. The old
+   * membership test blocked both directions. A bunch now needs only to be at
+   * or above the ORDER's length; only shorter is refused, since 40CM cannot be
+   * cut up to 50CM.
+   *
+   * ── ACCEPTED RISK ────────────────────────────────────────────────────────
+   * The server resolves a warehouse by matching item_code + custom_stem_length
+   * against item_locations, and on NO MATCH falls back silently to
+   * item_locations[0].warehouse. The old length check happened to catch that
+   * before a post. Relaxing it means a valid 50CM scan against a 60CM
+   * allocation now takes the fallback. Harmless on a single-warehouse OPL —
+   * both live examples are — but a real hole on a multi-warehouse one.
+   * The proper fix is server-side: match on variety and length-or-longer there
+   * too. See RESTYLE_PLAN.md §8.3.
+   */
   function validateAgainstOpl(s: PackingSession, bunch: BunchDetails): PackRejection | null {
-    // The OPL holds the Item TEMPLATE ("Monza"); the bunch holds the VARIANT
-    // ("Monza-50CM"). Accept either form, resolved via Item.variant_of rather
-    // than by parsing the code, so it survives variants that do not follow a
-    // Name-NNCM convention.
     const matchesVariety = (rowItemCode: string) =>
       rowItemCode === bunch.itemCode || rowItemCode === bunch.variantParent;
 
     if (!s.opl.rows.some((r) => matchesVariety(r.itemCode))) return 'variety-mismatch';
-    if (!s.opl.rows.some((r) => matchesVariety(r.itemCode) && r.stemLength === bunch.stemLength)) {
-      return 'length-mismatch';
+
+    const verdict = compareLength(bunch.stemLength, s.targets.orderLength);
+    if (verdict === 'shorter') return 'length-mismatch';
+    if (verdict === 'unknown') {
+      // Allowed on purpose — a format surprise must not stop a packer.
+      console.warn(
+        `[packing] length not comparable, allowing scan: bunch=${bunch.stemLength} order=${s.targets.orderLength}`,
+      );
     }
     return null;
   }
@@ -390,11 +417,10 @@ export default function PackingScreen() {
         return;
       }
       if (mismatch === 'length-mismatch') {
-        const wanted = [...new Set(s.opl.rows.map((r) => r.stemLength))].join(', ');
         reject(
           bunchId,
           mismatch,
-          `${bunch.stemLength} is not on ${s.opl.name}. This order wants ${wanted}.`,
+          `${bunch.stemLength} is shorter than this order's ${s.targets.orderLength}. Pick ${s.targets.orderLength} or longer.`,
         );
         return;
       }
@@ -579,7 +605,12 @@ export default function PackingScreen() {
   }
 
   // ── STEPS 2 + 3: review, then scan ───────────────────────────────────────
-  const lengths = [...new Set(session.opl.rows.map((r) => r.stemLength))].join(', ');
+  // The ORDER's length, not the OPL's: longer stems are cut down during
+  // packing, so the box holds the order's length and so does the label.
+  const lengths = displayLength(
+    session.targets.orderLength,
+    [...new Set(session.opl.rows.map((r) => r.stemLength))],
+  );
 
   // Boxes finished BEFORE this session plus any finished during it. boxNumber
   // only advances once a box fills, so every box below it is complete.
@@ -804,7 +835,9 @@ function OplPickerRow({
         <Text style={styles.pickerContents} numberOfLines={2}>
           {[
             item.varieties.join(', '),
-            item.lengths.join(', '),
+            // The ORDER's length, not the allocation's — longer stems are cut
+            // down during packing, so the box holds the order's length.
+            displayLength(item.orderLength, item.lengths),
             item.bunches > 0 ? `${item.bunches} bunches` : null,
           ]
             .filter(Boolean)

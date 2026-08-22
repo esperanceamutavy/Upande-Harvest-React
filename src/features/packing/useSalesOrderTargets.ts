@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
+import { orderLengthFromItemCode } from './lengths';
 import { resolveTargetUnits } from './targets';
 import type { SalesOrderTargets } from '../../types/packing';
 
@@ -87,6 +88,8 @@ async function fetchSalesOrderTargets({
     stockQty: Number(row.stock_qty ?? 0),
     // On the LINE, not the header — the header's field of the same name is
     // usually blank.
+    // The SO line has no length field; the item_code suffix is the source.
+    orderLength: orderLengthFromItemCode(_text(row.item_code)),
     customerCode: _text(row.custom_customer_code),
     truckDetails: _text(doc.custom_truck_details),
     consignee: _text(doc.custom_consignee),
