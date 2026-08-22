@@ -75,6 +75,27 @@ function splitCustomerCode(raw: string): { code: string; customer: string | null
   return { code, customer: customer || null };
 }
 
+/**
+ * What a packer should read FIRST on a picker row.
+ *
+ * They recognise what goes on the box — "TGW Flower 02", "Fresh From Source
+ * (TGW)" — not "Dutch Flower Group (DFG)". Preference order: the code's
+ * trailing part, then the consignee, then the customer name.
+ *
+ * The caption carries the customer name only when it is not already the primary
+ * line, so nothing is ever printed twice.
+ */
+function pickerIdentity(item: OplListItem): { primary: string | null; caption: string | null } {
+  const customer = item.customer?.trim() || null;
+  const code = item.customerCode ? splitCustomerCode(item.customerCode).code : null;
+  const consignee = item.consignee?.trim() || null;
+
+  const primary = code || consignee || customer;
+  const caption = customer && customer !== primary ? customer : null;
+
+  return { primary, caption };
+}
+
 /** [1 .. boxNumber-1] — every box the session has moved past. */
 function rangeBelow(boxNumber: number): number[] {
   const out: number[] = [];
@@ -84,15 +105,19 @@ function rangeBelow(boxNumber: number): number[] {
 
 // Filtered on the Sales Order's delivery_date throughout.
 //
-// The default is TOMORROW ONLY: packing runs a day ahead of the flight, so an
-// order due today has already been dispatched. A same-day delivery is still
-// reachable — "This week" is Monday–Sunday and so always contains today — which
-// is why no separate "Today" option is needed.
+// "Today" filters on delivery_date = TOMORROW, which is not a mistake: packing
+// runs a day ahead of the flight, so the day's WORK is the next day's
+// deliveries. Labelling it "Tomorrow" described the plane and read as work that
+// had not started yet. The union member is `packing_today` for the same reason.
+//
+// An order due today has already been dispatched, so it is excluded from the
+// default — still reachable via "This week", which is Monday–Sunday and so
+// always contains today.
 //
 // The other three are for looking back or hunting something outside the normal
 // rhythm. All four labels are short enough not to need a shortLabel fallback.
 const DATE_OPTIONS = [
-  { value: 'tomorrow', label: 'Tomorrow' },
+  { value: 'packing_today', label: 'Today' },
   { value: 'yesterday', label: 'Yesterday' },
   { value: 'week', label: 'This week' },
   { value: 'all', label: 'All time' },
@@ -115,7 +140,7 @@ export default function PackingScreen() {
   // `file_url` comes back relative to the instance, so it needs the base URL to
   // be openable.
   const instanceUrl = useAuthStore((st) => st.instanceUrl);
-  const [range, setRange] = useState<OplDateFilter>('tomorrow');
+  const [range, setRange] = useState<OplDateFilter>('packing_today');
   const oplList = useOplList(range);
   const oplMut = useOrderPickList();
   const targetsMut = useSalesOrderTargets();
@@ -694,6 +719,8 @@ function OplPickerRow({
   disabled: boolean;
   onPress: () => void;
 }) {
+  const identity = pickerIdentity(item);
+
   return (
     <Pressable
       onPress={onPress}
@@ -712,9 +739,21 @@ function OplPickerRow({
           {item.deliveryDate ? `Due ${item.deliveryDate}` : ''}
         </Text>
       </View>
-      <Text style={styles.pickerMeta} numberOfLines={1}>
-        {[item.customer, item.boxType].filter(Boolean).join(' · ') || '—'}
-      </Text>
+      {identity.primary ? (
+        <Text style={styles.pickerPrimary} numberOfLines={1}>
+          {identity.primary}
+        </Text>
+      ) : null}
+      {identity.caption ? (
+        <Text style={styles.pickerCaption} numberOfLines={1}>
+          {identity.caption}
+        </Text>
+      ) : null}
+      {item.boxType ? (
+        <Text style={styles.pickerMeta} numberOfLines={1}>
+          {item.boxType}
+        </Text>
+      ) : null}
       {/* What is actually IN the pick list, so a packer can tell them apart
           without opening each one. Duplicates are collapsed — one OPL commonly
           repeats a variety at a length dozens of times. */}
@@ -860,6 +899,8 @@ const styles = StyleSheet.create({
   pickerHead: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
   pickerName: { fontSize: 14, fontWeight: '600', color: colors.primary, flexShrink: 1 },
   pickerDate: { fontSize: 12, color: colors.muted },
+  pickerPrimary: { fontSize: 14, fontWeight: '600', color: colors.primary, marginTop: 2 },
+  pickerCaption: { ...typography.caption },
   pickerMeta: { fontSize: 13, color: colors.textSecondary },
   pickerContents: { fontSize: 13, fontWeight: '500', color: colors.primary, marginTop: 2 },
 

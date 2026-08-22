@@ -49,10 +49,11 @@ function startOfWeek(): Date {
 /** Inclusive `[from, to]` on `delivery_date`, or null for "all time". */
 function deliveryWindow(range: OplDateFilter): [string, string] | null {
   switch (range) {
-    case 'tomorrow': {
-      // TOMORROW ONLY. Packing runs a day ahead of the flight, so an order due
-      // today was dispatched already and has no business on the bench. On the
-      // 21st this shows deliveries dated the 22nd.
+    case 'packing_today': {
+      // delivery_date = TOMORROW. Labelled "Today" because that is the work:
+      // packing runs a day ahead of the flight, so an order due today was
+      // dispatched already and has no business on the bench. On the 21st this
+      // shows deliveries dated the 22nd.
       const due = localDate(shiftDays(1));
       return [due, due];
     }
@@ -179,10 +180,61 @@ async function fetchContents(oplNames: string[]): Promise<Map<string, Contents>>
   return byOpl;
 }
 
+interface Identity {
+  /** Keyed by Sales Order name. */
+  consigneeBySo: Map<string, string>;
+  /** Keyed by OPL name — the SO line carries `custom_opl`. */
+  codeByOpl: Map<string, string>;
+}
+
+/** Packer-facing identity for every listed OPL, in BULK — never per OPL.
+ *
+ *  Two queries rather than one, because the two fields live on different
+ *  doctypes: `custom_consignee` is a Sales Order header field and
+ *  `custom_customer_code` is on its child lines. Both are still a single
+ *  round-trip across the whole listing.
+ */
+async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Identity> {
+  const consigneeBySo = new Map<string, string>();
+  const codeByOpl = new Map<string, string>();
+  if (soNames.length === 0) return { consigneeBySo, codeByOpl };
+
+  const [headers, lines] = await Promise.all([
+    getResource(SO_DOCTYPE, ['name', 'custom_consignee'], [['name', 'in', soNames]]),
+    // Sales Order Item is a CHILD doctype, so the parent must be declared or
+    // Frappe answers PermissionError — same rule as Pick List Item below.
+    getResource(
+      'Sales Order Item',
+      ['parent', 'custom_opl', 'custom_customer_code'],
+      [
+        ['parent', 'in', soNames],
+        ['custom_opl', 'in', oplNames],
+      ],
+      undefined,
+      { parent: SO_DOCTYPE },
+    ),
+  ]);
+
+  for (const r of headers) {
+    const name = String(r.name ?? '');
+    const consignee = r.custom_consignee != null ? String(r.custom_consignee).trim() : '';
+    if (name && consignee) consigneeBySo.set(name, consignee);
+  }
+
+  for (const r of lines) {
+    const opl = r.custom_opl != null ? String(r.custom_opl).trim() : '';
+    const code = r.custom_customer_code != null ? String(r.custom_customer_code).trim() : '';
+    if (opl && code) codeByOpl.set(opl, code);
+  }
+
+  return { consigneeBySo, codeByOpl };
+}
+
 function toItem(
   r: Record<string, unknown>,
   deliveryDate: string | null,
   contents: Contents | undefined,
+  identity: Identity,
 ): OplListItem {
   return {
     name: String(r.name ?? ''),
@@ -194,6 +246,8 @@ function toItem(
     varieties: contents?.varieties ?? [],
     lengths: contents?.lengths ?? [],
     bunches: contents?.bunches ?? 0,
+    customerCode: identity.codeByOpl.get(String(r.name ?? '')) ?? null,
+    consignee: identity.consigneeBySo.get(String(r.sales_order ?? '')) ?? null,
   };
 }
 
@@ -223,10 +277,19 @@ async function fetchOplList(range: OplDateFilter): Promise<OplListResult> {
       );
     }
 
-    const contents = await fetchContents(rows.map((r) => String(r.name ?? '')).filter(Boolean));
+    const names = rows.map((r) => String(r.name ?? '')).filter(Boolean);
+    const [contents, identity] = await Promise.all([
+      fetchContents(names),
+      fetchIdentity(soNames, names),
+    ]);
     return {
       items: rows.map((r) =>
-        toItem(r, dates.get(String(r.sales_order ?? '')) ?? null, contents.get(String(r.name ?? ''))),
+        toItem(
+          r,
+          dates.get(String(r.sales_order ?? '')) ?? null,
+          contents.get(String(r.name ?? '')),
+          identity,
+        ),
       ),
       notice: null,
     };
@@ -249,11 +312,20 @@ async function fetchOplList(range: OplDateFilter): Promise<OplListResult> {
     'creation desc',
   );
 
-  const contents = await fetchContents(rows.map((r) => String(r.name ?? '')).filter(Boolean));
+  const names = rows.map((r) => String(r.name ?? '')).filter(Boolean);
+  const [contents, identity] = await Promise.all([
+    fetchContents(names),
+    fetchIdentity([...due.keys()], names),
+  ]);
 
   return {
     items: rows.map((r) =>
-      toItem(r, due.get(String(r.sales_order ?? '')) ?? null, contents.get(String(r.name ?? ''))),
+      toItem(
+        r,
+        due.get(String(r.sales_order ?? '')) ?? null,
+        contents.get(String(r.name ?? '')),
+        identity,
+      ),
     ),
     notice: null,
   };

@@ -24,8 +24,13 @@ export interface OplRow {
   packRate: string | null;
 }
 
-/** Delivery-date window for the OPL picker. */
-export type OplDateFilter = 'tomorrow' | 'yesterday' | 'week' | 'all';
+/** Delivery-date window for the OPL picker.
+ *
+ *  `packing_today` filters on `delivery_date = TOMORROW`, and that is correct:
+ *  packers pack today for tomorrow's flight, so the day's work is the next
+ *  day's deliveries. The member is named for the WORK, not the flight, because
+ *  the segment is labelled "Today" for the same reason. */
+export type OplDateFilter = 'packing_today' | 'yesterday' | 'week' | 'all';
 
 /** One row in the OPL picker — the list query's projection, no children. */
 export interface OplListItem {
@@ -38,6 +43,13 @@ export interface OplListItem {
   /** The Sales Order's `delivery_date`. This is what the picker filters on, so
    *  it is shown on every row. Null only if the SO lookup came back without one. */
   deliveryDate: string | null;
+
+  // ── Packer-facing identity. What goes on the box, which is what a packer
+  // recognises on the floor — the customer name often means little to them.
+  /** `custom_customer_code` from the SO LINE matched on `custom_opl`. */
+  customerCode: string | null;
+  /** `custom_consignee` from the Sales Order header. */
+  consignee: string | null;
 
   // ── Contents summary, so a packer can tell OPLs apart without opening each ──
   /** Distinct varieties on the pick list. */
