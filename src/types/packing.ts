@@ -24,6 +24,9 @@ export interface OplRow {
   packRate: string | null;
 }
 
+/** Packing progress, the picker's second filter dimension. */
+export type PackStatus = 'to_pack' | 'in_progress' | 'packed';
+
 /** Delivery-date window for the OPL picker.
  *
  *  `packing_today` filters on `delivery_date = TOMORROW`, and that is correct:
@@ -50,6 +53,15 @@ export interface OplListItem {
   customerCode: string | null;
   /** `custom_consignee` from the Sales Order header. */
   consignee: string | null;
+
+  // ── Packing status. A Farm Pack List is submitted only when its LAST box
+  // closes, so docstatus alone is authoritative: 1 = fully packed, 0 = started
+  // but incomplete, absent = not begun. Never inferred from box counts.
+  packStatus: PackStatus;
+  /** Boxes that have anything in them. 0 when no pack list exists. */
+  boxesPacked: number;
+  /** `custom_number_of_boxes` from the SO line. 0 when unknown. */
+  boxesTotal: number;
 
   // ── Contents summary, so a packer can tell OPLs apart without opening each ──
   /** Distinct varieties on the pick list. */

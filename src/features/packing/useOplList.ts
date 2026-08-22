@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
-import type { OplListItem, OplListResult, OplDateFilter } from '../../types/packing';
+import { groupRowsByBox } from './boxProgress';
+import type { OplListItem, OplListResult, OplDateFilter, PackStatus } from '../../types/packing';
 
 // The OPL picker's source. There is no `list_open_opls_for_packing` endpoint on
 // this site, so the doctypes are queried directly.
@@ -180,11 +181,79 @@ async function fetchContents(oplNames: string[]): Promise<Map<string, Contents>>
   return byOpl;
 }
 
+interface PackState {
+  status: PackStatus;
+  boxesPacked: number;
+}
+
+/** Packing status for every listed OPL, in BULK.
+ *
+ *  A Farm Pack List is submitted only when its LAST box closes, so `docstatus`
+ *  is authoritative on its own — 1 is fully packed, 0 is started but
+ *  incomplete, absent is not begun. Completeness is NEVER inferred from box
+ *  counts or `total_stems`.
+ */
+async function fetchPackState(oplNames: string[]): Promise<Map<string, PackState>> {
+  const byOpl = new Map<string, PackState>();
+  if (oplNames.length === 0) return byOpl;
+
+  const lists = await getResource(
+    'Farm Pack List',
+    ['name', 'order_pick_list', 'docstatus'],
+    [
+      ['order_pick_list', 'in', oplNames],
+      ['docstatus', '!=', 2],
+    ],
+  );
+  if (lists.length === 0) return byOpl;
+
+  const oplByFpl = new Map<string, string>();
+  for (const r of lists) {
+    const fpl = String(r.name ?? '');
+    const opl = String(r.order_pick_list ?? '');
+    if (!fpl || !opl) continue;
+    oplByFpl.set(fpl, opl);
+    byOpl.set(opl, {
+      status: Number(r.docstatus ?? 0) === 1 ? 'packed' : 'in_progress',
+      boxesPacked: 0,
+    });
+  }
+
+  // Rows for every pack list at once. Child doctype, so the parent is declared.
+  const rows = await getResource(
+    'Dispatch Form Item',
+    ['parent', 'bucket_id', 'bunch_qty', 'bunch_uom'],
+    [['parent', 'in', [...oplByFpl.keys()]]],
+    undefined,
+    { parent: 'Farm Pack List' },
+  );
+
+  const rowsByFpl = new Map<string, Record<string, unknown>[]>();
+  for (const r of rows) {
+    const fpl = String(r.parent ?? '');
+    if (!fpl) continue;
+    const list = rowsByFpl.get(fpl) ?? [];
+    list.push(r);
+    rowsByFpl.set(fpl, list);
+  }
+
+  for (const [fpl, fplRows] of rowsByFpl) {
+    const opl = oplByFpl.get(fpl);
+    const state = opl ? byOpl.get(opl) : undefined;
+    // Same grouping the resume path uses, so "boxes started" means one thing.
+    if (state) state.boxesPacked = groupRowsByBox(fplRows).size;
+  }
+
+  return byOpl;
+}
+
 interface Identity {
   /** Keyed by Sales Order name. */
   consigneeBySo: Map<string, string>;
   /** Keyed by OPL name — the SO line carries `custom_opl`. */
   codeByOpl: Map<string, string>;
+  /** `custom_number_of_boxes`, keyed by OPL name. */
+  boxesByOpl: Map<string, number>;
 }
 
 /** Packer-facing identity for every listed OPL, in BULK — never per OPL.
@@ -197,7 +266,8 @@ interface Identity {
 async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Identity> {
   const consigneeBySo = new Map<string, string>();
   const codeByOpl = new Map<string, string>();
-  if (soNames.length === 0) return { consigneeBySo, codeByOpl };
+  const boxesByOpl = new Map<string, number>();
+  if (soNames.length === 0) return { consigneeBySo, codeByOpl, boxesByOpl };
 
   const [headers, lines] = await Promise.all([
     getResource(SO_DOCTYPE, ['name', 'custom_consignee'], [['name', 'in', soNames]]),
@@ -205,7 +275,7 @@ async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Ide
     // Frappe answers PermissionError — same rule as Pick List Item below.
     getResource(
       'Sales Order Item',
-      ['parent', 'custom_opl', 'custom_customer_code'],
+      ['parent', 'custom_opl', 'custom_customer_code', 'custom_number_of_boxes'],
       [
         ['parent', 'in', soNames],
         ['custom_opl', 'in', oplNames],
@@ -223,11 +293,14 @@ async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Ide
 
   for (const r of lines) {
     const opl = r.custom_opl != null ? String(r.custom_opl).trim() : '';
+    if (!opl) continue;
     const code = r.custom_customer_code != null ? String(r.custom_customer_code).trim() : '';
-    if (opl && code) codeByOpl.set(opl, code);
+    if (code) codeByOpl.set(opl, code);
+    const boxes = Number(r.custom_number_of_boxes ?? 0) || 0;
+    if (boxes > 0) boxesByOpl.set(opl, boxes);
   }
 
-  return { consigneeBySo, codeByOpl };
+  return { consigneeBySo, codeByOpl, boxesByOpl };
 }
 
 function toItem(
@@ -235,6 +308,7 @@ function toItem(
   deliveryDate: string | null,
   contents: Contents | undefined,
   identity: Identity,
+  packState: Map<string, PackState>,
 ): OplListItem {
   return {
     name: String(r.name ?? ''),
@@ -248,6 +322,10 @@ function toItem(
     bunches: contents?.bunches ?? 0,
     customerCode: identity.codeByOpl.get(String(r.name ?? '')) ?? null,
     consignee: identity.consigneeBySo.get(String(r.sales_order ?? '')) ?? null,
+    // No pack list at all means nothing has been started.
+    packStatus: packState.get(String(r.name ?? ''))?.status ?? 'to_pack',
+    boxesPacked: packState.get(String(r.name ?? ''))?.boxesPacked ?? 0,
+    boxesTotal: identity.boxesByOpl.get(String(r.name ?? '')) ?? 0,
   };
 }
 
@@ -278,9 +356,10 @@ async function fetchOplList(range: OplDateFilter): Promise<OplListResult> {
     }
 
     const names = rows.map((r) => String(r.name ?? '')).filter(Boolean);
-    const [contents, identity] = await Promise.all([
+    const [contents, identity, packState] = await Promise.all([
       fetchContents(names),
       fetchIdentity(soNames, names),
+      fetchPackState(names),
     ]);
     return {
       items: rows.map((r) =>
@@ -289,6 +368,7 @@ async function fetchOplList(range: OplDateFilter): Promise<OplListResult> {
           dates.get(String(r.sales_order ?? '')) ?? null,
           contents.get(String(r.name ?? '')),
           identity,
+          packState,
         ),
       ),
       notice: null,
@@ -313,9 +393,10 @@ async function fetchOplList(range: OplDateFilter): Promise<OplListResult> {
   );
 
   const names = rows.map((r) => String(r.name ?? '')).filter(Boolean);
-  const [contents, identity] = await Promise.all([
+  const [contents, identity, packState] = await Promise.all([
     fetchContents(names),
     fetchIdentity([...due.keys()], names),
+    fetchPackState(names),
   ]);
 
   return {
@@ -325,6 +406,7 @@ async function fetchOplList(range: OplDateFilter): Promise<OplListResult> {
         due.get(String(r.sales_order ?? '')) ?? null,
         contents.get(String(r.name ?? '')),
         identity,
+        packState,
       ),
     ),
     notice: null,

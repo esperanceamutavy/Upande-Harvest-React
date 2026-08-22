@@ -37,6 +37,7 @@ import type {
   BunchDetails,
   OplDateFilter,
   OplListItem,
+  PackStatus,
   PackEntry,
   PackRejection,
   PackingSession,
@@ -85,6 +86,19 @@ function splitCustomerCode(raw: string): { code: string; customer: string | null
  * The caption carries the customer name only when it is not already the primary
  * line, so nothing is ever printed twice.
  */
+/** Progress line for a row that has a pack list. Null when nothing is started. */
+function pickerProgress(item: OplListItem): string | null {
+  if (item.packStatus === 'packed') {
+    return item.boxesTotal > 0 ? `Packed · ${item.boxesTotal} boxes` : 'Packed';
+  }
+  if (item.packStatus === 'in_progress') {
+    return item.boxesTotal > 0
+      ? `${item.boxesPacked} of ${item.boxesTotal} boxes packed`
+      : `${item.boxesPacked} boxes packed`;
+  }
+  return null;
+}
+
 function pickerIdentity(item: OplListItem): { primary: string | null; caption: string | null } {
   const customer = item.customer?.trim() || null;
   const code = item.customerCode ? splitCustomerCode(item.customerCode).code : null;
@@ -123,6 +137,19 @@ const DATE_OPTIONS = [
   { value: 'all', label: 'All time' },
 ] as const satisfies readonly { value: OplDateFilter; label: string }[];
 
+// A SECOND row rather than a fifth date segment. The date row is already at
+// four options and barely fits at 412dp, and status is a different dimension
+// anyway — a packer may want packed orders from this week, or unpacked ones
+// from tomorrow.
+//
+// The submitted/draft split is only meaningful because a Farm Pack List is now
+// submitted when its LAST box closes.
+const STATUS_OPTIONS = [
+  { value: 'to_pack', label: 'To pack' },
+  { value: 'in_progress', label: 'In progress' },
+  { value: 'packed', label: 'Packed' },
+] as const satisfies readonly { value: PackStatus; label: string }[];
+
 type FeedbackMsg = { tone: NoticeTone; text: string; pdfUrl?: string | null };
 
 const REJECTION_TONE: Record<PackRejection, NoticeTone> = {
@@ -141,6 +168,9 @@ export default function PackingScreen() {
   // be openable.
   const instanceUrl = useAuthStore((st) => st.instanceUrl);
   const [range, setRange] = useState<OplDateFilter>('packing_today');
+  // Status filters client-side off the already-fetched list, so switching it is
+  // instant and does not refetch.
+  const [status, setStatus] = useState<PackStatus>('to_pack');
   const oplList = useOplList(range);
   const oplMut = useOrderPickList();
   const targetsMut = useSalesOrderTargets();
@@ -492,10 +522,16 @@ export default function PackingScreen() {
 
   // ── STEP 1: picker ────────────────────────────────────────────────────────
   if (!session) {
+    const visible = (oplList.data?.items ?? []).filter((i) => i.packStatus === status);
+
     return (
       <Screen title="Packing">
         <Card title="Pick list date">
           <Segmented value={range} options={DATE_OPTIONS} onChange={setRange} />
+        </Card>
+
+        <Card title="Packing status">
+          <Segmented value={status} options={STATUS_OPTIONS} onChange={setStatus} />
         </Card>
 
         {loadingOpl ? (
@@ -514,17 +550,18 @@ export default function PackingScreen() {
           </View>
         ) : oplList.error ? (
           <Notice tone="danger">{extractFrappeError(oplList.error)}</Notice>
-        ) : (oplList.data?.items ?? []).length === 0 ? (
+        ) : visible.length === 0 ? (
           <Card title="No pick lists">
             <Text style={styles.body}>
               {oplList.data?.notice ??
-                'No pick lists for orders due in this window. Try a wider range — mixed-box pick lists are excluded.'}
+                `No ${STATUS_OPTIONS.find((o) => o.value === status)?.label.toLowerCase()} pick lists for orders due in this window. Try another status or a wider date range — mixed-box pick lists are excluded.`}
             </Text>
           </Card>
         ) : (
-          <Card title={`${oplList.data!.items.length} pick lists`}>
+          // Count reflects BOTH filters, not the unfiltered fetch.
+          <Card title={`${visible.length} pick lists`}>
             <View style={styles.list}>
-              {oplList.data!.items.map((item) => (
+              {visible.map((item) => (
                 <OplPickerRow
                   key={item.name}
                   item={item}
@@ -720,6 +757,7 @@ function OplPickerRow({
   onPress: () => void;
 }) {
   const identity = pickerIdentity(item);
+  const progress = pickerProgress(item);
 
   return (
     <Pressable
@@ -752,6 +790,11 @@ function OplPickerRow({
       {item.boxType ? (
         <Text style={styles.pickerMeta} numberOfLines={1}>
           {item.boxType}
+        </Text>
+      ) : null}
+      {progress ? (
+        <Text style={styles.pickerProgress} numberOfLines={1}>
+          {progress}
         </Text>
       ) : null}
       {/* What is actually IN the pick list, so a packer can tell them apart
@@ -901,6 +944,7 @@ const styles = StyleSheet.create({
   pickerDate: { fontSize: 12, color: colors.muted },
   pickerPrimary: { fontSize: 14, fontWeight: '600', color: colors.primary, marginTop: 2 },
   pickerCaption: { ...typography.caption },
+  pickerProgress: { ...typography.caption, color: colors.textSecondary },
   pickerMeta: { fontSize: 13, color: colors.textSecondary },
   pickerContents: { fontSize: 13, fontWeight: '500', color: colors.primary, marginTop: 2 },
 

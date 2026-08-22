@@ -1,7 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
-import { parseStemsPerBunch } from './targets';
+import { groupRowsByBox } from './boxProgress';
 import type { BoxProgress } from './resume';
 
 // What has already been packed against an OPL, so a session RESUMES rather than
@@ -46,30 +46,8 @@ async function fetchExistingPack(oplName: string): Promise<ExistingPack> {
         ? (res.data!.data!.pack_list_item as Record<string, unknown>[])
         : [];
 
-    const perBox = new Map<number, BoxProgress>();
-
-    for (const row of rows) {
-        // `bucket_id` is the BOX NUMBER despite the field name. A non-numeric
-        // value is skipped rather than coerced to 0, which would merge unrelated
-        // rows into a phantom box and corrupt the resume point.
-        const boxNumber = Number.parseInt(String(row.bucket_id ?? '').trim(), 10);
-        if (!Number.isFinite(boxNumber)) continue;
-
-        const bunches = Number(row.bunch_qty ?? 0) || 0;
-        // Each row carries its own uom, so mixed-size rows in one box still add
-        // up correctly. "Stems" does not parse, and one stem per unit is right.
-        const perUnit = parseStemsPerBunch(String(row.bunch_uom ?? '')) ?? 1;
-
-        const current = perBox.get(boxNumber) ?? { bunches: 0, stems: 0 };
-        perBox.set(boxNumber, {
-            bunches: current.bunches + bunches,
-            stems: current.stems + bunches * perUnit,
-        });
-    }
-
-    return { fplName, perBox };
+    return { fplName, perBox: groupRowsByBox(rows) };
 }
-
 export function useExistingPack() {
     return useMutation({ mutationFn: fetchExistingPack });
 }
