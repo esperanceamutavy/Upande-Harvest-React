@@ -2,7 +2,9 @@ import { useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Check, QrCode } from 'lucide-react-native';
 
+import { useBucketItem } from '../../features/receiving/useBucketItem';
 import { useCreateXfloraReceivingEntry } from '../../features/receiving/useCreateXfloraReceivingEntry';
+import { StemCountPrompt } from '../../features/receiving/StemCountPrompt';
 import { playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
 import { extractFrappeError } from '../../lib/api';
@@ -49,8 +51,15 @@ function generateBatchId(): string {
   return out;
 }
 
+/**
+ * A scanned bucket held back from posting until the packer supplies a stem
+ * count. Only unbunched Spray Roses land here.
+ */
+type PendingStemCount = { bucketId: string; itemCode: string; standard: number | null };
+
 export default function ReceivingScreen() {
   const createReceivingEntry = useCreateXfloraReceivingEntry();
+  const bucketItem = useBucketItem();
 
   const [bucketInput, setBucketInput] = useState('');
   const [isBatchMode, setIsBatchMode] = useState(false);
@@ -65,6 +74,7 @@ export default function ReceivingScreen() {
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackMsg | null>(null);
   const [scannerVisible, setScannerVisible] = useState(false);
+  const [pending, setPending] = useState<PendingStemCount | null>(null);
 
   const isSettingProgrammaticallyRef = useRef(false);
   const isProcessingRef = useRef(false);
@@ -78,15 +88,52 @@ export default function ReceivingScreen() {
 
   // Clears only the bucket field and refocuses — batch id, bunch size and quantity
   // are intentionally preserved between scans (xflora_receiving_entry.dart:154).
-  function resetState() {
+  //
+  // `focus` is false while the stem-count prompt is up: refocusing would raise
+  // the keyboard behind the modal, and the scan is still in flight so
+  // isProcessingRef must stay set.
+  function resetState({ focus = true }: { focus?: boolean } = {}) {
     setLoading(false);
-    isProcessingRef.current = false;
+    if (focus) isProcessingRef.current = false;
     isSettingProgrammaticallyRef.current = true;
     setBucketInput('');
     setTimeout(() => {
       isSettingProgrammaticallyRef.current = false;
     }, 0);
-    textInputRef.current?.focus();
+    if (focus) textInputRef.current?.focus();
+  }
+
+  /** Posts the entry. Shared by the direct path and the stem-count prompt. */
+  async function postEntry(bucketId: string, override: number | null) {
+    isProcessingRef.current = true;
+    setLoading(true);
+    setFeedback(null);
+    haptics.light();
+
+    const qty = isBunched ? Number.parseInt(quantity.trim(), 10) : null;
+    try {
+      const res = await createReceivingEntry.mutateAsync({
+        bucketId,
+        batchId: isBatchMode ? batchId : null,
+        isBunched,
+        bunchSize: isBunched ? selectedBunchSize : null,
+        quantity: isBunched ? qty : null,
+        overrideQty: override,
+      });
+      playSubmit();
+      const text =
+        res.overrideApplied && res.qty != null
+          ? `Received ${res.qty.toLocaleString()} stems (partial)`
+          : res.message;
+      setFeedback({ tone: 'success', text });
+    } catch (e) {
+      playError();
+      haptics.medium();
+      setFeedback({ tone: 'danger', text: extractFrappeError(e) });
+    } finally {
+      setPending(null);
+      resetState();
+    }
   }
 
   async function handleScannedData(raw: string) {
@@ -141,35 +188,40 @@ export default function ReceivingScreen() {
       return;
     }
 
-    isProcessingRef.current = true;
-    setLoading(true);
-    setFeedback(null);
-    haptics.light();
-
-    const qty = isBunched ? Number.parseInt(quantity.trim(), 10) : null;
-    const ov = isPartial ? Number.parseInt(overrideQty.trim(), 10) : null;
-    try {
-      const res = await createReceivingEntry.mutateAsync({
-        bucketId,
-        batchId: isBatchMode ? batchId : null,
-        isBunched,
-        bunchSize: isBunched ? selectedBunchSize : null,
-        quantity: isBunched ? qty : null,
-        overrideQty: ov,
-      });
-      playSubmit();
-      const text =
-        res.overrideApplied && res.qty != null
-          ? `Received ${res.qty.toLocaleString()} stems (partial)`
-          : res.message;
-      setFeedback({ tone: 'success', text });
-    } catch (e) {
-      playError();
-      haptics.medium();
-      setFeedback({ tone: 'danger', text: extractFrappeError(e) });
-    } finally {
-      resetState();
+    // Unbunched Spray Roses are never a full bucket, so ask for the stem count
+    // rather than letting the server apply the 90-stem bucket rate. Only
+    // 'standard' qualifies: 'partial' already carries a count the packer typed,
+    // and 'bunched' is a different branch on the server entirely.
+    if (mode === 'standard') {
+      isProcessingRef.current = true;
+      setLoading(true);
+      setFeedback(null);
+      try {
+        const item = await bucketItem.mutateAsync(bucketId);
+        if (item.isSprayRose) {
+          setPending({ bucketId, itemCode: item.itemCode, standard: item.standard });
+          haptics.light();
+          resetState({ focus: false });
+          return;
+        }
+      } catch (e) {
+        // Fail CLOSED. Falling through would post the bucket at its full rate,
+        // and if it was an unbunched Spray Rose that silently overstates the
+        // receipt — the exact error this prompt exists to prevent. A rescan is
+        // cheap; a wrong stem count is not.
+        playError();
+        haptics.medium();
+        setFeedback({
+          tone: 'danger',
+          text: `Could not read the variety for ${bucketId}: ${extractFrappeError(e)}. Scan again.`,
+        });
+        resetState();
+        return;
+      }
     }
+
+    const ov = isPartial ? Number.parseInt(overrideQty.trim(), 10) : null;
+    await postEntry(bucketId, ov);
   }
 
   function onChangeText(text: string) {
@@ -284,6 +336,10 @@ export default function ReceivingScreen() {
               editable={!loading}
             />
           </Field>
+          <Text style={styles.hint}>
+            Unbunched Spray Roses are asked for a stem count automatically — this mode is for
+            everything else.
+          </Text>
         </Card>
       ) : null}
 
@@ -323,6 +379,25 @@ export default function ReceivingScreen() {
         onScan={handleCameraScan}
         onCancel={() => setScannerVisible(false)}
       />
+
+      {/* Keyed on the bucket so each scan gets a prompt with empty local state. */}
+      {pending ? (
+        <StemCountPrompt
+          key={pending.bucketId}
+          visible
+          itemCode={pending.itemCode}
+          standard={pending.standard}
+          busy={loading}
+          onConfirm={(stems) => {
+            void postEntry(pending.bucketId, stems);
+          }}
+          onCancel={() => {
+            setPending(null);
+            setFeedback({ tone: 'info', text: 'Cancelled — nothing was recorded.' });
+            resetState();
+          }}
+        />
+      ) : null}
     </Screen>
   );
 }
