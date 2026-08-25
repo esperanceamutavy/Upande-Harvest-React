@@ -127,8 +127,12 @@ export interface SalesOrderTargets {
    *  "50CM"). Longer stems are cut down to this during packing, so it is the
    *  headline length and the floor for Rule 3 — not the OPL's allocation. */
   orderLength: string | null;
-  /** `custom_truck_details` — Sales Order header. */
-  truckDetails: string | null;
+  /** Truck, RESOLVED: the SO LINE's `custom_truck` ("GWD"), falling back to the
+   *  header's `custom_truck_details` only when the line is empty, since older
+   *  orders carry it there. One value, so the card can never show two rows. */
+  truck: string | null;
+  /** `custom_barcode` from the SO line. Often empty. */
+  barcode: string | null;
   /** `custom_consignee` — Sales Order header. Box Label carries it too. */
   consignee: string | null;
 

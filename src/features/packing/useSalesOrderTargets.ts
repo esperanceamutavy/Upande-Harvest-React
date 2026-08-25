@@ -91,7 +91,10 @@ async function fetchSalesOrderTargets({
     // The SO line has no length field; the item_code suffix is the source.
     orderLength: orderLengthFromItemCode(_text(row.item_code)),
     customerCode: _text(row.custom_customer_code),
-    truckDetails: _text(doc.custom_truck_details),
+    // LINE first — the header's custom_truck_details is the wrong source and
+    // is only consulted for older orders that predate the line field.
+    truck: _text(row.custom_truck) ?? _text(doc.custom_truck_details),
+    barcode: _text(row.custom_barcode),
     consignee: _text(doc.custom_consignee),
     stemsPerBunch: units.stemsPerBunch,
     unitLabel: units.unitLabel,

@@ -639,8 +639,14 @@ export default function PackingScreen() {
           {session.targets.consignee ? (
             <DetailRow label="Consignee" value={session.targets.consignee} />
           ) : null}
-          {session.targets.truckDetails ? (
-            <DetailRow label="Truck" value={session.targets.truckDetails} />
+          {/* One Truck row, never two: the value is resolved line-first in
+              useSalesOrderTargets, so the header is only ever a fallback. */}
+          {session.targets.truck ? (
+            <DetailRow label="Truck" value={session.targets.truck} />
+          ) : null}
+          {/* Last of the identity rows — least often present. */}
+          {session.targets.barcode ? (
+            <DetailRow label="Barcode" value={session.targets.barcode} />
           ) : null}
           <DetailRow label="Box type" value={session.opl.boxType ?? '—'} />
           {/* Targets from the SALES ORDER, not the OPL — the allocator is
