@@ -894,16 +894,33 @@ The `Box Label` print format is **Jinja with `raw_printing = 0`**, so the delive
 
 Note this retires an earlier observation. §8.3 previously recorded `custom_farm` as "read into a local and never used — send it anyway, harmless." **It is not merely harmless: it is the input the label's `farm` field needs.** Keep sending it; the fix is on the server side of the same wire.
 
-**⛔ The header `length` field is WRONG and must be resolved, not just populated.**
+**~~⛔ The header `length` field is WRONG~~ — ✅ RESOLVED (`a1675a6`, and the follow-up below).**
 
-`Box Label.length` is a Link to `Stem Length` — a single value. But a box holds **one variety across one or more stem lengths, or several varieties when it is a mixed box**, so no single value can describe its contents. `sync_box_label` sets it once, from whichever row created the label, and never updates it. A box built from `50CM` then `60CM` bunches is labelled `50CM`.
+The original finding: `Box Label.length` is a Link to `Stem Length` — a single value — but a box holds one variety across one or more stem lengths, so no single value can describe its contents. `sync_box_label` set it once, from whichever row created the label, and never updated it.
 
-Two acceptable fixes; this is a decision, not a bug to patch:
+**The framing was wrong, and so was the data underneath it.** The question is not *"which of the several lengths in this box do we show?"* — it is *"whose length is this?"* A box serves one Sales Order line, longer stems are **cut down** during packing, and the order's length is what physically leaves in the box. The row lengths are what was scanned IN, which is a different thing.
 
-1. **Drop `length` from the format** and render per-row lengths from `box_item`, which already carries `length` per row. Cleanest — the data is already correct at row level.
-2. **Redefine it as an explicit summary** (dominant length, or a range like `50–60CM`) and document that it is not authoritative.
+So the fix was not to summarise the rows but to stop sourcing from them. Both `Box Label.length` and `Box Label Item.length` now carry the **order's** length, parsed from the Sales Order Item's `item_code` suffix (`Brinessa-50CM` → `50CM`) matched on `custom_opl` — the same derivation the app uses in `src/features/packing/lengths.ts`. `custom_length` on the line is null on live orders, so the suffix is the only source.
 
-Either way, **`box_item` rows are the real contents** — `.product-line` renders one per row — and the header field must not be trusted as a description of the box.
+This also collapses the mixed-length worry on the normal path: one order line means one length, so the header always has exactly one value to hold. The set-based guard is retained for the fallback path only.
+
+**Two things to know:**
+- Both fields are Links to `Stem Length`, so a parsed value is kept only if it exists in that table. This is load-bearing beyond bad data: `"Odd-Name"` parses to `"Name"`, and under the module's FAILURE POLICY a failed link validation loses the **whole label**, not just its length. Unlisted values fall back to the row's own length.
+- **Mixed boxes remain unresolved** — several varieties at several lengths cannot be described by one header value under any sourcing rule. Mixed packing is deferred to v2, so this is not currently reachable. `box_item` rows stay the real contents; `.product-line` renders one per row.
+
+**⛔ Box Labels created before `a1675a6` still carry bunch lengths.** The rebuild is idempotent, so re-saving their Farm Pack List corrects them. Not done automatically.
+
+**✅ The QR now identifies the BOX, not the pack list — and old labels do not.**
+
+`_attach_qr` encoded `/app/farm-pack-list/{fpl.name}`, which is **identical for every box on the list**. Two consequences, one of them silent:
+
+1. Boxes 1, 2 and 3 of an OPL carried the same code and **could not be told apart when scanned**. `Box Label` carries `loaded`, `loaded_internal_transfer` and `delivered`, so per-box scanning is clearly intended downstream — dispatch and loading need to know which box they have.
+2. Frappe's `File.save_file` deduplicates on `(content_hash, is_private)`, so the identical PNGs **collapsed onto one shared file**. Measured on the snapshot: three boxes of one pack list → **1 distinct PNG**. After the change → **3**.
+
+The encoded URL is now `/app/box-label/{label.name}`. Each QR is unique, the dedupe goes inert, and a scan resolves to the box. The Farm Pack List is one hop away via `farm_pack_list_link`.
+
+> **⛔ CARRY-OVER — a decision, not a migration.**
+> The generation guard is `if not label.qr_code`, so **every Box Label created before this change keeps its pack-list QR**. Those boxes remain mutually indistinguishable when scanned. Regenerating means clearing `qr_code` on the affected labels and re-saving their Farm Pack List. **Deliberately not done automatically** — it rewrites labels that may already be printed and on physical boxes, where the paper and the record would then disagree. Whoever owns dispatch decides whether the printed stock is reprinted or the old codes are left to age out.
 
 **Day code — DEFERRED, NOT CANCELLED.**
 
