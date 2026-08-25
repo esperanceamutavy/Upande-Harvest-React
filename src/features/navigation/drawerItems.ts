@@ -1,6 +1,7 @@
 import {
   ArrowLeftRight,
   Box,
+  Truck,
   Hexagon,
   LayoutGrid,
   PackageCheck,
@@ -36,6 +37,7 @@ export const WORKFLOW_ITEMS: DrawerItem[] = [
   { label: 'Receiving Out', icon: PackageOpen, route: '/receiving-out' },
   { label: 'Grading', icon: Hexagon, route: '/grading' },
   { label: 'Packing', icon: Box, route: '/packing' },
+  { label: 'Dispatch', icon: Truck, route: '/dispatch' },
   //
   // Still to come (RESTYLE_PLAN.md §8):
   //   Staging → Boxes → '/staging'

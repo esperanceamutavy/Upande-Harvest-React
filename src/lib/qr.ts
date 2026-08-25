@@ -22,16 +22,47 @@ const ID_KEYS = [
   'bunch_id',
   'coldroom_bucket',
   'bucket_id',
+  'box_label',
+  'box_id',
   'id',
   'employee_id',
   'employee',
   'grader',
 ] as const;
 
+/**
+ * A Frappe desk URL — `https://host/app/box-label/BOX-OPL-2026-00158-1`.
+ *
+ * Box Label QRs encode exactly this: `_attach_qr` in dispatch_session.py renders
+ * `/app/box-label/<name>` so a scan resolves to the BOX rather than to its pack
+ * list. A packer scanning a printed label therefore gets a URL, not a bare id
+ * and not JSON — and dispatch would post the whole URL as the box name.
+ *
+ * Anchored at both ends so it cannot fire on a JSON blob that merely contains a
+ * path. Only a string that IS a desk URL matches.
+ */
+const DESK_URL = /^(?:https?:\/\/[^/]+)?\/app\/[a-z0-9-]+\/([^/?#]+)\/?$/i;
+
+function idFromDeskUrl(text: string): string | null {
+  const match = DESK_URL.exec(text);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]).trim() || null;
+  } catch {
+    // A malformed escape must not throw out of a scan.
+    return match[1].trim() || null;
+  }
+}
+
 /** Pull the clean id out of whatever the scanner produced. */
 export function extractScannedId(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
+
+  // Checked before JSON: a desk URL is not JSON, and the `:"` fallback below
+  // would not find anything usable in one.
+  const fromUrl = idFromDeskUrl(trimmed);
+  if (fromUrl) return fromUrl;
 
   try {
     const parsed = JSON.parse(trimmed) as unknown;
