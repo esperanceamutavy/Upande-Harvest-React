@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
 import { groupRowsByBox } from './boxProgress';
+import { resolveCustomerCode } from './customerCode';
 import { orderLengthFromItemCode } from './lengths';
 import type { OplListItem, OplListResult, OplDateFilter, PackStatus } from '../../types/packing';
 
@@ -257,24 +258,35 @@ interface Identity {
   boxesByOpl: Map<string, number>;
   /** The order's own length, keyed by OPL name. */
   lengthByOpl: Map<string, string>;
+  /** HEADER customer code, keyed by Sales Order — the per-line fallback. */
+  codeBySo: Map<string, string>;
 }
 
 /** Packer-facing identity for every listed OPL, in BULK — never per OPL.
  *
- *  Two queries rather than one, because the two fields live on different
- *  doctypes: `custom_consignee` is a Sales Order header field and
- *  `custom_customer_code` is on its child lines. Both are still a single
- *  round-trip across the whole listing.
+ *  Two queries rather than one, because the fields live on two doctypes:
+ *  `custom_consignee` is header-only, and `custom_customer_code` exists on BOTH
+ *  the header and the child lines. The line is the code that goes on the box, so
+ *  it wins; the header is the fallback and rides along on the query that was
+ *  already fetching the consignee. Still one round-trip each across the whole
+ *  listing, never per OPL.
  */
 async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Identity> {
   const consigneeBySo = new Map<string, string>();
   const codeByOpl = new Map<string, string>();
   const boxesByOpl = new Map<string, number>();
   const lengthByOpl = new Map<string, string>();
-  if (soNames.length === 0) return { consigneeBySo, codeByOpl, boxesByOpl, lengthByOpl };
+  const codeBySo = new Map<string, string>();
+  if (soNames.length === 0) {
+    return { consigneeBySo, codeByOpl, boxesByOpl, lengthByOpl, codeBySo };
+  }
 
   const [headers, lines] = await Promise.all([
-    getResource(SO_DOCTYPE, ['name', 'custom_consignee'], [['name', 'in', soNames]]),
+    getResource(
+      SO_DOCTYPE,
+      ['name', 'custom_consignee', 'custom_customer_code'],
+      [['name', 'in', soNames]],
+    ),
     // Sales Order Item is a CHILD doctype, so the parent must be declared or
     // Frappe answers PermissionError — same rule as Pick List Item below.
     getResource(
@@ -293,6 +305,9 @@ async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Ide
     const name = String(r.name ?? '');
     const consignee = r.custom_consignee != null ? String(r.custom_consignee).trim() : '';
     if (name && consignee) consigneeBySo.set(name, consignee);
+    const headerCode =
+      r.custom_customer_code != null ? String(r.custom_customer_code).trim() : '';
+    if (name && headerCode) codeBySo.set(name, headerCode);
   }
 
   for (const r of lines) {
@@ -308,7 +323,7 @@ async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Ide
     if (length) lengthByOpl.set(opl, length);
   }
 
-  return { consigneeBySo, codeByOpl, boxesByOpl, lengthByOpl };
+  return { consigneeBySo, codeByOpl, boxesByOpl, lengthByOpl, codeBySo };
 }
 
 function toItem(
@@ -328,7 +343,12 @@ function toItem(
     varieties: contents?.varieties ?? [],
     lengths: contents?.lengths ?? [],
     bunches: contents?.bunches ?? 0,
-    customerCode: identity.codeByOpl.get(String(r.name ?? '')) ?? null,
+    // LINE first, HEADER as fallback. Only reading the line is why most picker
+    // rows showed no code — see customerCode.ts for the live evidence.
+    customerCode: resolveCustomerCode(
+      identity.codeByOpl.get(String(r.name ?? '')),
+      identity.codeBySo.get(String(r.sales_order ?? '')),
+    ),
     consignee: identity.consigneeBySo.get(String(r.sales_order ?? '')) ?? null,
     // No pack list at all means nothing has been started.
     packStatus: packState.get(String(r.name ?? ''))?.status ?? 'to_pack',

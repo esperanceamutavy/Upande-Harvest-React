@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
+import { resolveCustomerCode } from './customerCode';
 import { orderLengthFromItemCode } from './lengths';
 import { resolveTargetUnits } from './targets';
 import type { SalesOrderTargets } from '../../types/packing';
@@ -86,11 +87,12 @@ async function fetchSalesOrderTargets({
     uom,
     conversionFactor,
     stockQty: Number(row.stock_qty ?? 0),
-    // On the LINE, not the header — the header's field of the same name is
-    // usually blank.
     // The SO line has no length field; the item_code suffix is the source.
     orderLength: orderLengthFromItemCode(_text(row.item_code)),
-    customerCode: _text(row.custom_customer_code),
+    // LINE first, HEADER as fallback. Live data has it both ways round:
+    // SAL-ORD-2026-01624 has all three lines set and a blank header,
+    // SAL-ORD-2026-01578 has one line of four set. See customerCode.ts.
+    customerCode: resolveCustomerCode(row.custom_customer_code, doc.custom_customer_code),
     // LINE first — the header's custom_truck_details is the wrong source and
     // is only consulted for older orders that predate the line field.
     truck: _text(row.custom_truck) ?? _text(doc.custom_truck_details),

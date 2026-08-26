@@ -26,6 +26,7 @@ import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOve
 import { playBeep, playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
 import { extractFrappeError } from '../../lib/api';
+import { splitCustomerCode } from '../../features/packing/customerCode';
 import { extractScannedId } from '../../lib/qr';
 import { useAuthStore } from '../../stores/auth';
 import { Button } from '../../components/ui/Button';
@@ -68,14 +69,6 @@ const MAX_LOG_ROWS = 12;
  * Split on the LAST hyphen: customer names contain them, packer-facing codes
  * are the tail. No hyphen means the whole string is the code.
  */
-function splitCustomerCode(raw: string): { code: string; customer: string | null } {
-  const at = raw.lastIndexOf('-');
-  if (at < 0) return { code: raw.trim(), customer: null };
-  const customer = raw.slice(0, at).trim();
-  const code = raw.slice(at + 1).trim();
-  if (!code) return { code: raw.trim(), customer: null };
-  return { code, customer: customer || null };
-}
 
 /**
  * What a packer should read FIRST on a picker row.
@@ -625,8 +618,9 @@ export default function PackingScreen() {
           <DetailRow label="Pick list" value={session.opl.name} />
           <DetailRow label="Customer" value={session.opl.customer ?? '—'} />
           {/* Each omitted entirely when empty — a blank row is worse than none.
-              The code lives on the Sales Order LINE; the header field of the
-              same name is usually blank. */}
+              The code comes from the Sales Order LINE, falling back to the
+              header; live orders populate one or the other, not reliably both.
+              See features/packing/customerCode.ts. */}
           {session.targets.customerCode
             ? (() => {
                 const { code, customer } = splitCustomerCode(session.targets.customerCode!);
