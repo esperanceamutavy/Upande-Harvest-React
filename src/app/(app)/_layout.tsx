@@ -73,6 +73,7 @@ function AppTabs() {
       <Tabs.Screen name="grading" options={{ href: null }} />
       <Tabs.Screen name="packing" options={{ href: null }} />
       <Tabs.Screen name="dispatch" options={{ href: null }} />
+      <Tabs.Screen name="traceability" options={{ href: null }} />
       <Tabs.Screen name="stock-entry/[id]" options={{ href: null }} />
     </Tabs>
   );
