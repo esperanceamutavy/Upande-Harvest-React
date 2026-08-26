@@ -26,7 +26,6 @@ import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOve
 import { playBeep, playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
 import { extractFrappeError } from '../../lib/api';
-import { splitCustomerCode } from '../../features/packing/customerCode';
 import { extractScannedId } from '../../lib/qr';
 import { useAuthStore } from '../../stores/auth';
 import { Button } from '../../components/ui/Button';
@@ -88,10 +87,8 @@ function pickerProgress(item: OplListItem): string | null {
  */
 function pickerIdentity(item: OplListItem): { primary: string | null; caption: string | null } {
   const customer = item.customer?.trim() || null;
-  // The customer is passed so the CODE's own hyphens survive the split.
-  const code = item.customerCode
-    ? splitCustomerCode(item.customerCode, item.customer).code
-    : null;
+  // Already resolved off the Customer Code record — nothing is parsed here.
+  const code = item.customerCode?.code ?? null;
   const consignee = item.consignee?.trim() || null;
 
   const primary = code || consignee || customer;
@@ -614,20 +611,20 @@ export default function PackingScreen() {
           <DetailRow label="Pick list" value={session.opl.name} />
           <DetailRow label="Customer" value={session.opl.customer ?? '—'} />
           {/* Each omitted entirely when empty — a blank row is worse than none.
-              The code comes from the Sales Order LINE, falling back to the
-              header; live orders populate one or the other, not reliably both.
-              See features/packing/customerCode.ts. */}
-          {session.targets.customerCode
-            ? (() => {
-                const { code, customer } = splitCustomerCode(
-                  session.targets.customerCode!,
-                  session.opl.customer,
-                );
-                // The caption usually repeats the Customer row above. That is
-                // deliberate — it confirms the code belongs to that customer.
-                return <DetailRow label="Customer code" value={code} caption={customer} />;
-              })()
-            : null}
+              The code reference comes from the Sales Order LINE, falling back to
+              the header; the code itself is looked up on the Customer Code
+              record, because the stored value is that record's NAME and the two
+              diverge. See features/packing/customerCodeRef.ts. */}
+          {session.targets.customerCode ? (
+            // The caption usually repeats the Customer row above. That is
+            // deliberate — it confirms the code belongs to that customer. It now
+            // comes from Customer Code.customer rather than a parsed substring.
+            <DetailRow
+              label="Customer code"
+              value={session.targets.customerCode.code}
+              caption={session.targets.customerCode.customer}
+            />
+          ) : null}
           <DetailRow label="Sales order" value={session.opl.salesOrder ?? '—'} />
           {session.targets.consignee ? (
             <DetailRow label="Consignee" value={session.targets.consignee} />

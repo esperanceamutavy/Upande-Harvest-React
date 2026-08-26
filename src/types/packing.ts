@@ -6,6 +6,32 @@ import type { ResumeState } from '../features/packing/resume';
 // One write endpoint: createOrUpdateFarmPackList. There is no box lifecycle,
 // no capacity check server-side, and no OPL list endpoint.
 
+/**
+ * A resolved `custom_customer_code`.
+ *
+ * The field is a LINK to the Customer Code doctype, so the value stored on the
+ * Sales Order is a record NAME, and the code that goes on the box is that
+ * record's `code` field. The two DIVERGE in live data:
+ *
+ *   name "Dutch Flower Group (DFG)-TFC  BY AIR"  ->  code "TFC  ED3442-FT"
+ *
+ * No amount of string splitting on the name could produce that, which is why
+ * this is a lookup and not a parse.
+ */
+export interface CustomerCodeRef {
+  /** The stored Link value — the Customer Code record name. */
+  ref: string;
+  /**
+   * `Customer Code.code`, rendered EXACTLY as stored: live codes contain double
+   * spaces ("TFC  ED3442-FT") and internal hyphens ("TFC-IS0086-FT"), and
+   * neither is collapsed. Falls back to `ref` when the record is missing or its
+   * code is blank — showing the stored value beats showing nothing.
+   */
+  code: string;
+  /** `Customer Code.customer`. Null when the record could not be read. */
+  customer: string | null;
+}
+
 /** One `Pick List Item` row on an OPL (`item_locations`).
  *
  *  `item_code` here is the Item **TEMPLATE** (e.g. `Monza`), while a
@@ -49,8 +75,9 @@ export interface OplListItem {
 
   // ── Packer-facing identity. What goes on the box, which is what a packer
   // recognises on the floor — the customer name often means little to them.
-  /** `custom_customer_code` from the SO LINE matched on `custom_opl`. */
-  customerCode: string | null;
+  /** `custom_customer_code` from the SO LINE matched on `custom_opl`, falling
+   *  back to the header, then RESOLVED through the Customer Code doctype. */
+  customerCode: CustomerCodeRef | null;
   /** `custom_consignee` from the Sales Order header. */
   consignee: string | null;
 
@@ -120,9 +147,9 @@ export interface SalesOrderTargets {
   /** `stock_qty` — the order in stems. Display only. */
   stockQty: number;
 
-  /** `custom_customer_code` from the matched SO LINE — the header field of the
-   *  same name is usually blank. Shaped `"<customer>-<code>"`. */
-  customerCode: string | null;
+  /** `custom_customer_code` from the matched SO LINE, falling back to the
+   *  header, then RESOLVED through the Customer Code doctype. */
+  customerCode: CustomerCodeRef | null;
   /** The ORDER's stem length, from `item_code`'s suffix ("Brinessa-50CM" ->
    *  "50CM"). Longer stems are cut down to this during packing, so it is the
    *  headline length and the floor for Rule 3 — not the OPL's allocation. */

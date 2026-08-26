@@ -1,7 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
-import { resolveCustomerCode } from './customerCode';
+import { resolveCustomerCodeRef, toCustomerCodeRef } from './customerCodeRef';
 import { orderLengthFromItemCode } from './lengths';
 import { resolveTargetUnits } from './targets';
 import type { SalesOrderTargets } from '../../types/packing';
@@ -62,6 +62,30 @@ async function fetchSalesOrderTargets({
 
   if (!row) throw new Error(`No Sales Order line on ${salesOrder} points at ${oplName}`);
 
+  // `custom_customer_code` is a LINK: the stored value is a Customer Code record
+  // NAME and the code that goes on the box is that record's `code`. They diverge
+  // in live data, so this is a lookup, not a parse — see customerCodeRef.ts.
+  // One extra read, and only when the order actually carries a reference.
+  const codeRefName = resolveCustomerCodeRef(
+    row.custom_customer_code,
+    doc.custom_customer_code,
+  );
+  let codeRef = null;
+  if (codeRefName) {
+    let record: Record<string, unknown> | null = null;
+    try {
+      const cc = await apiClient.get<{ data?: Record<string, unknown> }>(
+        `/api/resource/${encodeURIComponent('Customer Code')}/${encodeURIComponent(codeRefName)}`,
+      );
+      record = cc.data?.data ?? null;
+    } catch {
+      // A missing or unreadable record must not fail the whole session: the
+      // fallback renders the stored reference, which is still informative.
+      record = null;
+    }
+    codeRef = toCustomerCodeRef(codeRefName, record);
+  }
+
   const uom = String(row.uom ?? '');
   const conversionFactor = Number(row.conversion_factor ?? 0) || 1;
   const qty = Number(row.qty ?? 0);
@@ -89,10 +113,9 @@ async function fetchSalesOrderTargets({
     stockQty: Number(row.stock_qty ?? 0),
     // The SO line has no length field; the item_code suffix is the source.
     orderLength: orderLengthFromItemCode(_text(row.item_code)),
-    // LINE first, HEADER as fallback. Live data has it both ways round:
-    // SAL-ORD-2026-01624 has all three lines set and a blank header,
-    // SAL-ORD-2026-01578 has one line of four set. See customerCode.ts.
-    customerCode: resolveCustomerCode(row.custom_customer_code, doc.custom_customer_code),
+    // LINE first, HEADER as fallback, then RESOLVED through Customer Code —
+    // the stored value is a record NAME, not the code. See customerCodeRef.ts.
+    customerCode: codeRef,
     // LINE first — the header's custom_truck_details is the wrong source and
     // is only consulted for older orders that predate the line field.
     truck: _text(row.custom_truck) ?? _text(doc.custom_truck_details),

@@ -2,9 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
 import { groupRowsByBox } from './boxProgress';
-import { resolveCustomerCode } from './customerCode';
+import { resolveCustomerCodeRef, toCustomerCodeRef } from './customerCodeRef';
 import { orderLengthFromItemCode } from './lengths';
-import type { OplListItem, OplListResult, OplDateFilter, PackStatus } from '../../types/packing';
+import type {
+  CustomerCodeRef,
+  OplListItem,
+  OplListResult,
+  OplDateFilter,
+  PackStatus,
+} from '../../types/packing';
 
 // The OPL picker's source. There is no `list_open_opls_for_packing` endpoint on
 // this site, so the doctypes are queried directly.
@@ -258,8 +264,10 @@ interface Identity {
   boxesByOpl: Map<string, number>;
   /** The order's own length, keyed by OPL name. */
   lengthByOpl: Map<string, string>;
-  /** HEADER customer code, keyed by Sales Order — the per-line fallback. */
+  /** HEADER customer code REFERENCE, keyed by Sales Order — the line's fallback. */
   codeBySo: Map<string, string>;
+  /** Customer Code records, keyed by record name. One bulk query, never per row. */
+  codeRecords: Map<string, { code: unknown; customer: unknown }>;
 }
 
 /** Packer-facing identity for every listed OPL, in BULK — never per OPL.
@@ -277,8 +285,9 @@ async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Ide
   const boxesByOpl = new Map<string, number>();
   const lengthByOpl = new Map<string, string>();
   const codeBySo = new Map<string, string>();
+  const codeRecords = new Map<string, { code: unknown; customer: unknown }>();
   if (soNames.length === 0) {
-    return { consigneeBySo, codeByOpl, boxesByOpl, lengthByOpl, codeBySo };
+    return { consigneeBySo, codeByOpl, boxesByOpl, lengthByOpl, codeBySo, codeRecords };
   }
 
   const [headers, lines] = await Promise.all([
@@ -323,7 +332,39 @@ async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Ide
     if (length) lengthByOpl.set(opl, length);
   }
 
-  return { consigneeBySo, codeByOpl, boxesByOpl, lengthByOpl, codeBySo };
+  // THIRD query: resolve every distinct Customer Code reference in the listing
+  // in ONE go. `custom_customer_code` is a Link, so the code that goes on the
+  // box lives on the linked record — see customerCodeRef.ts. Keyed on the
+  // distinct names, so this is one round-trip regardless of row count.
+  const refNames = Array.from(
+    new Set([...codeByOpl.values(), ...codeBySo.values()].filter((v) => v.length > 0)),
+  );
+  if (refNames.length > 0) {
+    const records = await getResource(
+      'Customer Code',
+      ['name', 'code', 'customer'],
+      [['name', 'in', refNames]],
+    );
+    for (const r of records) {
+      const name = String(r.name ?? '');
+      if (name) codeRecords.set(name, { code: r.code, customer: r.customer });
+    }
+  }
+
+  return { consigneeBySo, codeByOpl, boxesByOpl, lengthByOpl, codeBySo, codeRecords };
+}
+
+/** The row's resolved customer code, or null when it has no reference at all. */
+function resolveCustomerCodeRefFor(
+  r: Record<string, unknown>,
+  identity: Identity,
+): CustomerCodeRef | null {
+  const ref = resolveCustomerCodeRef(
+    identity.codeByOpl.get(String(r.name ?? '')),
+    identity.codeBySo.get(String(r.sales_order ?? '')),
+  );
+  if (!ref) return null;
+  return toCustomerCodeRef(ref, identity.codeRecords.get(ref) ?? null);
 }
 
 function toItem(
@@ -343,12 +384,8 @@ function toItem(
     varieties: contents?.varieties ?? [],
     lengths: contents?.lengths ?? [],
     bunches: contents?.bunches ?? 0,
-    // LINE first, HEADER as fallback. Only reading the line is why most picker
-    // rows showed no code — see customerCode.ts for the live evidence.
-    customerCode: resolveCustomerCode(
-      identity.codeByOpl.get(String(r.name ?? '')),
-      identity.codeBySo.get(String(r.sales_order ?? '')),
-    ),
+    // LINE first, HEADER as fallback, then RESOLVED through Customer Code.
+    customerCode: resolveCustomerCodeRefFor(r, identity),
     consignee: identity.consigneeBySo.get(String(r.sales_order ?? '')) ?? null,
     // No pack list at all means nothing has been started.
     packStatus: packState.get(String(r.name ?? ''))?.status ?? 'to_pack',
