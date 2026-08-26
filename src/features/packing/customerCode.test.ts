@@ -38,63 +38,100 @@ test('both empty yields null, so the caller can omit the row', () => {
     assert.equal(resolveCustomerCode('  ', ''), null);
 });
 
-test('THE LIVE CASE — codes contain spaces, split on the LAST hyphen', () => {
-    const { code, customer } = splitCustomerCode('Dutch Flower Group (DFG)-TGW FT ROSE GRANDE');
-    assert.equal(code, 'TGW FT ROSE GRANDE');
-    assert.equal(customer, 'Dutch Flower Group (DFG)');
+// --- The split: strip the CUSTOMER PREFIX, not the last hyphen ---------------
+
+test('THE CASE THAT DROVE THIS — the code keeps its own hyphen', () => {
+    // Last-hyphen splitting gave "JED". The code is "Adnan flowers - JED".
+    assert.deepEqual(splitCustomerCode('Azalea-Adnan flowers - JED', 'Azalea'), {
+        code: 'Adnan flowers - JED',
+        customer: 'Azalea',
+    });
 });
 
-test('a hyphenated customer name does not break the split', () => {
-    // Last hyphen wins, so the customer part keeps its own hyphens.
-    const { code, customer } = splitCustomerCode('Fresh-From-Source-TGW FLOWER 02');
-    assert.equal(code, 'TGW FLOWER 02');
-    assert.equal(customer, 'Fresh-From-Source');
+test('parentheses in the customer name are handled by construction', () => {
+    assert.deepEqual(
+        splitCustomerCode(
+            'Dutch Flower Group (DFG)-TGW FT ROSE GRANDE',
+            'Dutch Flower Group (DFG)',
+        ),
+        { code: 'TGW FT ROSE GRANDE', customer: 'Dutch Flower Group (DFG)' },
+    );
 });
 
-test('no hyphen returns the whole value as the code', () => {
-    assert.deepEqual(splitCustomerCode('TGWFT'), { code: 'TGWFT', customer: null });
-    assert.deepEqual(splitCustomerCode('TGW FLOWER 02'), { code: 'TGW FLOWER 02', customer: null });
+test('a hyphenated customer name is stripped whole', () => {
+    assert.deepEqual(splitCustomerCode('Fresh-From-Source-TGW 02', 'Fresh-From-Source'), {
+        code: 'TGW 02',
+        customer: 'Fresh-From-Source',
+    });
 });
 
-test('a trailing hyphen keeps the raw value rather than inventing a split', () => {
-    assert.deepEqual(splitCustomerCode('DFG-'), { code: 'DFG-', customer: null });
-    assert.deepEqual(splitCustomerCode('DFG- '), { code: 'DFG-', customer: null });
+test('the prefix matches case-insensitively, but the CODE is returned as stored', () => {
+    const { code, customer } = splitCustomerCode('AZALEA-Adnan Flowers - JED', 'azalea');
+    // Casing and inner spacing of the code are untouched.
+    assert.equal(code, 'Adnan Flowers - JED');
+    // The caption comes from the value as stored, not from the argument.
+    assert.equal(customer, 'AZALEA');
 });
 
-test('surrounding whitespace is trimmed, inner spacing preserved', () => {
-    const { code, customer } = splitCustomerCode('  DFG - TGW  FT ROSE  ');
-    assert.equal(code, 'TGW  FT ROSE');
-    assert.equal(customer, 'DFG');
+test('surrounding whitespace on either side does not defeat the prefix', () => {
+    assert.equal(splitCustomerCode('  Azalea-Adnan flowers - JED  ', ' Azalea ').code,
+        'Adnan flowers - JED');
+});
+
+test('NO PREFIX — falls back to the last-hyphen split', () => {
+    // Some codes may not carry the customer prefix at all.
+    assert.deepEqual(splitCustomerCode('Gulf Flowers-KAT', 'Azalea'), {
+        code: 'KAT',
+        customer: 'Gulf Flowers',
+    });
+    // No customer known at all: same fallback.
+    assert.deepEqual(splitCustomerCode('Flora Holland-BLUME 2000'), {
+        code: 'BLUME 2000',
+        customer: 'Flora Holland',
+    });
+    assert.deepEqual(splitCustomerCode('Flora Holland-BLUME 2000', null), {
+        code: 'BLUME 2000',
+        customer: 'Flora Holland',
+    });
+});
+
+test('NO HYPHEN — the whole string is the code, with no caption', () => {
+    assert.deepEqual(splitCustomerCode('TGWFT', 'Azalea'), { code: 'TGWFT', customer: null });
+    assert.deepEqual(splitCustomerCode('TGW FLOWER 02'), {
+        code: 'TGW FLOWER 02',
+        customer: null,
+    });
+});
+
+test('a prefix with nothing after it is not a split worth making', () => {
+    assert.deepEqual(splitCustomerCode('Azalea-', 'Azalea'), { code: 'Azalea-', customer: null });
+    assert.deepEqual(splitCustomerCode('DFG- ', 'DFG'), { code: 'DFG-', customer: null });
+});
+
+test('a customer that merely PREFIXES the value without a hyphen does not match', () => {
+    // "Azalea Ltd-CODE" must not be stripped by customer "Azalea": the boundary
+    // is `customer + "-"`, so this falls through to the last-hyphen split.
+    assert.deepEqual(splitCustomerCode('Azalea Ltd-CODE', 'Azalea'), {
+        code: 'CODE',
+        customer: 'Azalea Ltd',
+    });
+});
+
+test('live header codes still split correctly under the new rule', () => {
+    assert.equal(splitCustomerCode('Flora Holland-BLUME 2000', 'Flora Holland').code,
+        'BLUME 2000');
+    assert.equal(splitCustomerCode('APH-APH N', 'APH').code, 'APH N');
+    assert.equal(splitCustomerCode('Zami-ALDI 4.5+', 'Zami').code, 'ALDI 4.5+');
+    assert.equal(splitCustomerCode('Azalea-BLOOMAX', 'Azalea').code, 'BLOOMAX');
+    // Nested customer names: the prefix wins over the last hyphen.
+    assert.deepEqual(
+        splitCustomerCode('Dutch Flower Group (DFG)-TFC -AH3522', 'Dutch Flower Group (DFG)'),
+        { code: 'TFC -AH3522', customer: 'Dutch Flower Group (DFG)' },
+    );
 });
 
 test('end to end — resolve then split, header-sourced', () => {
     const raw = resolveCustomerCode('', 'Dutch Flower Group (DFG)-TGW FT ROSE GRANDE');
     assert.ok(raw);
-    assert.equal(splitCustomerCode(raw).code, 'TGW FT ROSE GRANDE');
-});
-
-// --- Live HEADER codes -------------------------------------------------------
-// 248 submitted Sales Orders carry a header code. These are real values, pinned
-// so the split's behaviour on them is a recorded decision rather than a surprise.
-
-test('live header codes split as expected', () => {
-    assert.equal(splitCustomerCode('Flora Holland-BLUME 2000').code, 'BLUME 2000');
-    assert.equal(splitCustomerCode('APH-APH N').code, 'APH N');
-    assert.equal(splitCustomerCode('Zami-ALDI 4.5+').code, 'ALDI 4.5+');
-    assert.equal(splitCustomerCode('Azalea-BLOOMAX').code, 'BLOOMAX');
-});
-
-test('a code containing " - " splits at the LAST hyphen — known, unchanged', () => {
-    // "Azalea-Adnan flowers - JED" yields "JED", not "Adnan flowers - JED".
-    // Arguably the customer is "Azalea" and the code is the rest, but the
-    // last-hyphen rule is deliberate and shared with the box label, so this is
-    // recorded rather than special-cased.
-    assert.deepEqual(splitCustomerCode('Azalea-Adnan flowers - JED'), {
-        code: 'JED',
-        customer: 'Azalea-Adnan flowers',
-    });
-    assert.deepEqual(splitCustomerCode('Dutch Flower Group (DFG)-TFC -AH3522'), {
-        code: 'AH3522',
-        customer: 'Dutch Flower Group (DFG)-TFC',
-    });
+    assert.equal(splitCustomerCode(raw, 'Dutch Flower Group (DFG)').code, 'TGW FT ROSE GRANDE');
 });

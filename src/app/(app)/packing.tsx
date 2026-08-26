@@ -63,23 +63,6 @@ import type {
 
 const MAX_LOG_ROWS = 12;
 
-/**
- * `"Dutch Flower Group (DFG)-TGW Flower 01"` → code + customer.
- *
- * Split on the LAST hyphen: customer names contain them, packer-facing codes
- * are the tail. No hyphen means the whole string is the code.
- */
-
-/**
- * What a packer should read FIRST on a picker row.
- *
- * They recognise what goes on the box — "TGW Flower 02", "Fresh From Source
- * (TGW)" — not "Dutch Flower Group (DFG)". Preference order: the code's
- * trailing part, then the consignee, then the customer name.
- *
- * The caption carries the customer name only when it is not already the primary
- * line, so nothing is ever printed twice.
- */
 /** Progress line for a row that has a pack list. Null when nothing is started. */
 function pickerProgress(item: OplListItem): string | null {
   if (item.packStatus === 'packed') {
@@ -93,9 +76,22 @@ function pickerProgress(item: OplListItem): string | null {
   return null;
 }
 
+/**
+ * What a packer should read FIRST on a picker row.
+ *
+ * They recognise what goes on the box — "TGW Flower 02", "Fresh From Source
+ * (TGW)" — not "Dutch Flower Group (DFG)". Preference order: the code, then the
+ * consignee, then the customer name.
+ *
+ * The caption carries the customer name only when it is not already the primary
+ * line, so nothing is ever printed twice.
+ */
 function pickerIdentity(item: OplListItem): { primary: string | null; caption: string | null } {
   const customer = item.customer?.trim() || null;
-  const code = item.customerCode ? splitCustomerCode(item.customerCode).code : null;
+  // The customer is passed so the CODE's own hyphens survive the split.
+  const code = item.customerCode
+    ? splitCustomerCode(item.customerCode, item.customer).code
+    : null;
   const consignee = item.consignee?.trim() || null;
 
   const primary = code || consignee || customer;
@@ -623,7 +619,10 @@ export default function PackingScreen() {
               See features/packing/customerCode.ts. */}
           {session.targets.customerCode
             ? (() => {
-                const { code, customer } = splitCustomerCode(session.targets.customerCode!);
+                const { code, customer } = splitCustomerCode(
+                  session.targets.customerCode!,
+                  session.opl.customer,
+                );
                 // The caption usually repeats the Customer row above. That is
                 // deliberate — it confirms the code belongs to that customer.
                 return <DetailRow label="Customer code" value={code} caption={customer} />;

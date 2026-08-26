@@ -28,26 +28,52 @@ export function resolveCustomerCode(lineCode: unknown, headerCode: unknown): str
 }
 
 /**
- * Split `"<customer>-<code>"` into its parts, on the LAST hyphen.
+ * Split `"<customer>-<code>"` into its parts by STRIPPING THE CUSTOMER PREFIX.
  *
  * `"Dutch Flower Group (DFG)-TGW FT ROSE GRANDE"` → code
  * `"TGW FT ROSE GRANDE"`, customer `"Dutch Flower Group (DFG)"`.
  *
- * BOTH parts can contain spaces, and the customer part can contain hyphens and
- * brackets — which is why the split is on the last hyphen and not the first,
- * and why nothing here strips or normalises whitespace inside the parts.
+ * Splitting on the last hyphen was wrong whenever the CODE itself contained one:
+ * `"Azalea-Adnan flowers - JED"` yielded `"JED"` when the code is
+ * `"Adnan flowers - JED"`. The customer is already known — the Sales Order is
+ * fetched for targets anyway — so it is used to find the boundary instead of
+ * guessing at it.
  *
- * A value with no hyphen, or a trailing hyphen with nothing after it, is
- * returned whole as the code: better to show the raw string than to invent a
- * split that was not there.
+ * Three cases, in order:
+ *   1. the value starts with `customer + "-"` → the remainder is the code
+ *   2. otherwise → last-hyphen split, since some codes carry no prefix
+ *   3. no hyphen at all → the whole string is the code, with no caption
+ *
+ * The prefix is matched case-insensitively and around trimmed whitespace, but
+ * the CODE IS RETURNED EXACTLY AS STORED — no case or inner-spacing
+ * normalisation. Both parts may contain spaces, and the customer may contain
+ * hyphens and parentheses, all of which case 1 handles by construction.
  */
-export function splitCustomerCode(raw: string): { code: string; customer: string | null } {
-    const at = raw.lastIndexOf('-');
-    if (at < 0) return { code: raw.trim(), customer: null };
+export function splitCustomerCode(
+    raw: string,
+    customer?: string | null,
+): { code: string; customer: string | null } {
+    const value = raw.trim();
 
-    const customer = raw.slice(0, at).trim();
-    const code = raw.slice(at + 1).trim();
-    if (!code) return { code: raw.trim(), customer: null };
+    // Case 1 — strip the known customer prefix.
+    const known = (customer ?? '').trim();
+    if (known) {
+        const prefix = `${known}-`;
+        if (value.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase()) {
+            const code = value.slice(prefix.length).trim();
+            // A prefix with nothing after it is not a split worth making.
+            if (code) return { code, customer: value.slice(0, known.length).trim() || null };
+        }
+    }
 
-    return { code, customer: customer || null };
+    // Case 3 — nothing to split on.
+    const at = value.lastIndexOf('-');
+    if (at < 0) return { code: value, customer: null };
+
+    // Case 2 — no usable prefix, so fall back to the last hyphen.
+    const head = value.slice(0, at).trim();
+    const tail = value.slice(at + 1).trim();
+    if (!tail) return { code: value, customer: null };
+
+    return { code: tail, customer: head || null };
 }
