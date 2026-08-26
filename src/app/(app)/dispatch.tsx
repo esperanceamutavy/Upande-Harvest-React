@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { QrCode, Trash2 } from 'lucide-react-native';
+import { FileText, QrCode, Trash2 } from 'lucide-react-native';
 
 import {
   useCloseSession,
@@ -25,16 +25,22 @@ import type { ScanBoxResult } from '../../types/dispatch';
 // Truck and driver latch at the top exactly the way Receiving Out latches the
 // grader: one decision, then a scan field that keeps focus.
 //
-// ORDER COMPLETION IS THE MOMENT THAT MATTERS. When `order_complete` comes back
-// true a Delivery Note has been SUBMITTED and stock has left XFL Graded Sold.
-// That is not the same weight as an ordinary scan, so it gets a Notice that
-// PERSISTS across subsequent scans rather than being replaced by the next
-// "box 4 of 9" line, plus the note name on that box's log row.
+// CLOSING IS THE MOMENT THAT MATTERS — not the scan that completes an order.
+// close_session raises one Delivery Note per Sales Order for exactly the boxes
+// this session carried, each created AND SUBMITTED, which is when stock leaves
+// XFL Graded Sold. So the persistent summary hangs off the close, and a scan
+// only reports progress.
 //
-// A `delivery_note_error` is a WARN, never an error: the box is physically on
-// the truck and the scan succeeded. Only the paperwork needs a human. The
-// server guarantees this — box.loaded is written and committed before the note
-// is attempted, and both create and submit are guarded.
+// AN ORDER SHIPPING ACROSS TWO TRUCKS PRODUCES TWO DELIVERY NOTES, one per
+// session, and that is intended. Each describes a real departure and ERPNext
+// accumulates `per_delivered` across them. Until 2026-08-26 the note was raised
+// by the scan that completed an order, so a split order's FIRST truck left with
+// no document behind it at all — the boxes went out unaccounted.
+//
+// `delivery_note_errors` are WARN, never error: the boxes went either way. Only
+// the paperwork needs a human. The server guarantees the ordering — every box
+// is committed as loaded long before any note is attempted, and each order's
+// note is guarded independently so one failure cannot cost the others theirs.
 
 const MAX_LOG_ROWS = 40;
 
@@ -46,18 +52,19 @@ interface LogRow {
   boxLabel: string;
   detail: string;
   tone: NoticeTone;
-  /** Set only on the scan that completed an order. */
-  deliveryNote: string | null;
   time: string;
 }
 
-/** The last completed order. Held separately so it survives the next scan. */
-interface CompletedOrder {
-  salesOrder: string;
-  customer: string | null;
-  deliveryNote: string | null;
-  deliveryNoteError: string | null;
-  boxes: number;
+/**
+ * What a close produced. Held after the session ends so the loader can read the
+ * Delivery Note names off the screen — this is the record that stock moved.
+ */
+interface CloseSummary {
+  session: string;
+  truckReg: string;
+  totalBoxes: number;
+  deliveryNotes: string[];
+  deliveryNoteErrors: string[];
 }
 
 export default function DispatchScreen() {
@@ -74,7 +81,7 @@ export default function DispatchScreen() {
 
   const [boxInput, setBoxInput] = useState('');
   const [entries, setEntries] = useState<LogRow[]>([]);
-  const [completed, setCompleted] = useState<CompletedOrder | null>(null);
+  const [closed, setClosed] = useState<CloseSummary | null>(null);
   const [feedback, setFeedback] = useState<FeedbackMsg | null>(null);
   const [scannerVisible, setScannerVisible] = useState(false);
 
@@ -159,27 +166,30 @@ export default function DispatchScreen() {
     setTruckReg(null);
     setDriverName(null);
     setEntries([]);
-    setCompleted(null);
+    setClosed(null);
     setFeedback(null);
     setProgrammatic('');
     truckRef.current?.focus();
   }
 
   async function handleClose() {
-    if (!session) return;
+    if (!session || !truckReg) return;
     try {
       const res = await closeMut.mutateAsync(session);
       playSubmit();
-      haptics.light();
-      const notes = res.deliveryNotes.length
-        ? ` Delivery Notes: ${res.deliveryNotes.join(', ')}.`
-        : '';
-      Alert.alert(
-        'Session closed',
-        `${res.totalBoxes} box${res.totalBoxes === 1 ? '' : 'es'} on ${truckReg}. `
-          + `${res.ordersCompleted} order${res.ordersCompleted === 1 ? '' : 's'} completed.${notes}`,
-        [{ text: 'OK', onPress: changeTruck }],
-      );
+      haptics.medium();
+      // The summary REPLACES the session rather than clearing the screen: these
+      // Delivery Note names are the record that stock moved, and a loader may
+      // need to read them back. `changeTruck` is now an explicit choice.
+      setClosed({
+        session,
+        truckReg,
+        totalBoxes: res.totalBoxes,
+        deliveryNotes: res.deliveryNotes,
+        deliveryNoteErrors: res.deliveryNoteErrors,
+      });
+      setSession(null);
+      setFeedback(null);
     } catch (e) {
       fail(extractFrappeError(e));
     }
@@ -190,7 +200,8 @@ export default function DispatchScreen() {
     Alert.alert(
       'Close session?',
       `${entries.length} box${entries.length === 1 ? '' : 'es'} scanned onto ${truckReg}. `
-        + 'No more boxes can be added after closing.',
+        + 'Closing creates and submits the Delivery Notes — stock moves at this point, '
+        + 'and no more boxes can be added.',
       [
         { text: 'Keep scanning', style: 'cancel' },
         { text: 'Close', style: 'destructive', onPress: () => void handleClose() },
@@ -200,9 +211,17 @@ export default function DispatchScreen() {
 
   // ------------------------------------------------------------------ scans
 
-  /** Progress for a freshly loaded box. `already_loaded` carries no counts. */
+  /**
+   * Progress for a freshly loaded box. The counts span the WHOLE ORDER, not
+   * this session, so they tell a loader how much of it is still to come —
+   * including boxes that another truck may end up taking.
+   *
+   * `already_loaded` carries no counts, so it never reaches here.
+   */
   function describe(res: ScanBoxResult): string {
-    return res.boxesTotal ? `Loaded (${res.boxesLoaded} of ${res.boxesTotal})` : 'Loaded';
+    return res.boxesTotal
+      ? `Loaded — ${res.boxesLoaded} of ${res.boxesTotal} on this order`
+      : 'Loaded';
   }
 
   async function handleBoxScan(raw: string) {
@@ -242,41 +261,18 @@ export default function DispatchScreen() {
           boxLabel: res.boxLabel,
           detail: elsewhere ? `Already on ${res.onSession}` : 'Already on this truck',
           tone: elsewhere ? 'danger' : 'warn',
-          deliveryNote: null,
         });
         return;
       }
 
+      // A scan is now only a scan — no paperwork is raised until close.
       playSubmit();
-
-      if (res.orderComplete) {
-        // Stock has MOVED. Held in its own slot so the next scan cannot wipe it.
-        setCompleted({
-          salesOrder: res.salesOrder ?? '—',
-          customer: res.customer,
-          deliveryNote: res.deliveryNote,
-          deliveryNoteError: res.deliveryNoteError,
-          boxes: res.boxesTotal,
-        });
-        haptics.medium();
-      }
-
-      if (res.deliveryNoteError) {
-        // WARN, not error: the box IS loaded. Only the paperwork needs a human.
-        setFeedback({
-          tone: 'warn',
-          text: `${res.boxLabel} is loaded. ${res.deliveryNoteError} — the box is on the truck; `
-            + 'the Delivery Note needs finishing by hand.',
-        });
-      } else {
-        setFeedback({ tone: 'success', text: res.message });
-      }
+      setFeedback({ tone: 'success', text: res.message });
 
       log({
         boxLabel: res.boxLabel,
         detail: [describe(res), res.customer, res.salesOrder].filter(Boolean).join(' · '),
-        tone: res.deliveryNoteError ? 'warn' : res.orderComplete ? 'success' : 'info',
-        deliveryNote: res.deliveryNote,
+        tone: 'info',
       });
     } catch (e) {
       fail(extractFrappeError(e));
@@ -357,85 +353,98 @@ export default function DispatchScreen() {
         ) : null
       }
     >
-      <Card title={session ? 'Truck' : 'Open a session'}>
-        {session ? (
-          <View style={styles.rows}>
-            <DetailRow label="Truck" value={truckReg ?? '—'} />
-            <DetailRow label="Driver" value={driverName ?? '—'} />
-            <DetailRow label="Session" value={session} />
-            <Button
-              label="Change truck"
-              variant="outline"
-              onPress={changeTruck}
-              disabled={busy}
-              style={styles.changeBtn}
-            />
-          </View>
-        ) : (
-          <View style={styles.form}>
-            <Field label="Truck registration">
-              <View style={styles.scanRow}>
+      {session || !closed ? (
+        <Card title={session ? 'Truck' : 'Open a session'}>
+          {session ? (
+            <View style={styles.rows}>
+              <DetailRow label="Truck" value={truckReg ?? '—'} />
+              <DetailRow label="Driver" value={driverName ?? '—'} />
+              <DetailRow label="Session" value={session} />
+              <Button
+                label="Change truck"
+                variant="outline"
+                onPress={changeTruck}
+                disabled={busy}
+                style={styles.changeBtn}
+              />
+            </View>
+          ) : (
+            <View style={styles.form}>
+              <Field label="Truck registration">
+                <View style={styles.scanRow}>
+                  <TextInput
+                    ref={truckRef}
+                    style={[styles.input, styles.scanInput]}
+                    value={truckInput}
+                    onChangeText={(t) => setTruckInput(t.toUpperCase())}
+                    autoFocus
+                    autoCapitalize="characters"
+                    placeholder="e.g. KDA 123A"
+                    placeholderTextColor={colors.muted}
+                    editable={!busy}
+                  />
+                  <Pressable style={styles.qrBtn} onPress={() => openScanner('truck')}>
+                    <QrCode size={22} color={colors.text} />
+                  </Pressable>
+                </View>
+              </Field>
+
+              <Field label="Driver name">
                 <TextInput
-                  ref={truckRef}
-                  style={[styles.input, styles.scanInput]}
-                  value={truckInput}
-                  onChangeText={(t) => setTruckInput(t.toUpperCase())}
-                  autoFocus
-                  autoCapitalize="characters"
-                  placeholder="e.g. KDA 123A"
+                  style={styles.input}
+                  value={driverInput}
+                  onChangeText={setDriverInput}
+                  placeholder="Driver name"
                   placeholderTextColor={colors.muted}
                   editable={!busy}
+                  returnKeyType="done"
+                  onSubmitEditing={() => void handleOpenSession()}
                 />
-                <Pressable style={styles.qrBtn} onPress={() => openScanner('truck')}>
-                  <QrCode size={22} color={colors.text} />
-                </Pressable>
-              </View>
-            </Field>
+              </Field>
 
-            <Field label="Driver name">
-              <TextInput
-                style={styles.input}
-                value={driverInput}
-                onChangeText={setDriverInput}
-                placeholder="Driver name"
-                placeholderTextColor={colors.muted}
-                editable={!busy}
-                returnKeyType="done"
-                onSubmitEditing={() => void handleOpenSession()}
+              <Button
+                label="Open session"
+                onPress={() => void handleOpenSession()}
+                disabled={busy}
+                loading={openMut.isPending}
               />
-            </Field>
+            </View>
+          )}
+        </Card>
+      ) : null}
 
-            <Button
-              label="Open session"
-              onPress={() => void handleOpenSession()}
-              disabled={busy}
-              loading={openMut.isPending}
-            />
-          </View>
-        )}
-      </Card>
-
-      {/* PERSISTENT. Stock has moved — this outlives the next scan. */}
-      {completed ? (
-        <Card title="Order complete">
-          <Notice tone={completed.deliveryNoteError ? 'warn' : 'success'}>
-            {completed.salesOrder}
-            {completed.customer ? ` for ${completed.customer}` : ''} is fully loaded
-            {completed.boxes ? ` — all ${completed.boxes} boxes` : ''}.
-            {completed.deliveryNote
-              ? ` Delivery Note ${completed.deliveryNote} submitted; stock has moved.`
-              : ''}
-            {completed.deliveryNoteError
-              ? ` ${completed.deliveryNoteError} — the boxes are loaded, but the Delivery Note`
-                + ' needs finishing by hand.'
-              : ''}
+      {/* PERSISTENT. This is the record that stock moved — it stays on screen
+          until the loader explicitly starts the next truck. */}
+      {closed ? (
+        <Card title="Session closed">
+          <Notice tone={closed.deliveryNoteErrors.length ? 'warn' : 'success'}>
+            {closed.truckReg} left with {closed.totalBoxes}{' '}
+            box{closed.totalBoxes === 1 ? '' : 'es'}.
+            {closed.deliveryNotes.length
+              ? ` ${closed.deliveryNotes.length} Delivery Note`
+                + `${closed.deliveryNotes.length === 1 ? '' : 's'} submitted — stock has moved.`
+              : ' No Delivery Notes were created.'}
           </Notice>
-          <Button
-            label="Dismiss"
-            variant="ghost"
-            onPress={() => setCompleted(null)}
-            style={styles.changeBtn}
-          />
+
+          {closed.deliveryNotes.length ? (
+            <View style={styles.rows}>
+              {closed.deliveryNotes.map((note) => (
+                <View key={note} style={styles.noteRow}>
+                  <FileText size={16} color={colors.success} />
+                  <Text style={styles.noteName}>{note}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {/* WARN, not error: the boxes went out either way. */}
+          {closed.deliveryNoteErrors.map((err) => (
+            <Notice key={err} tone="warn">
+              {err} — the boxes are on the truck; this Delivery Note needs finishing by hand.
+            </Notice>
+          ))}
+
+          <Button label="Start next truck" onPress={changeTruck} style={styles.changeBtn} />
         </Card>
       ) : null}
 
@@ -472,19 +481,19 @@ export default function DispatchScreen() {
                 <View style={styles.logMain}>
                   <Text style={styles.logLabel}>{row.boxLabel}</Text>
                   <Text style={styles.logDetail}>{row.detail}</Text>
-                  {row.deliveryNote ? (
-                    <Text style={styles.logNote}>Delivery Note {row.deliveryNote}</Text>
-                  ) : null}
                 </View>
                 <Text style={styles.logTime}>{row.time}</Text>
-                <Pressable
-                  onPress={() => confirmRemove(row.boxLabel)}
-                  disabled={busy}
-                  hitSlop={8}
-                  style={styles.removeBtn}
-                >
-                  <Trash2 size={18} color={colors.error} />
-                </Pressable>
+                {/* Removal is only possible while the session is open. */}
+                {session ? (
+                  <Pressable
+                    onPress={() => confirmRemove(row.boxLabel)}
+                    disabled={busy}
+                    hitSlop={8}
+                    style={styles.removeBtn}
+                  >
+                    <Trash2 size={18} color={colors.error} />
+                  </Pressable>
+                ) : null}
               </View>
             ))}
           </View>
@@ -550,7 +559,8 @@ const styles = StyleSheet.create({
   logMain: { flex: 1, gap: 2 },
   logLabel: { fontSize: 14, fontWeight: '600', color: colors.text },
   logDetail: { fontSize: 12, color: colors.muted },
-  logNote: { fontSize: 12, fontWeight: '600', color: colors.success },
+  noteRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  noteName: { fontSize: 14, fontWeight: '600', color: colors.text },
   logTime: { fontSize: 11, color: colors.muted },
   removeBtn: { padding: 4 },
   hint: { fontSize: 13, color: colors.muted, textAlign: 'center' },

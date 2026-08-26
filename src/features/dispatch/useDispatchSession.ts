@@ -65,11 +65,12 @@ async function openSession(p: {
     };
 }
 
-// SERIALIZED under 'dispatch'. scan_box reads the box, writes `loaded`, appends
-// a session row and then evaluates order completion from a fresh count — two
-// concurrent scans of the last two boxes could both see the order incomplete
-// and neither would raise the Delivery Note. A distinct key from 'packing' and
-// 'grading' so the flows do not block each other.
+// SERIALIZED under 'dispatch'. scan_box does a read-modify-write on the session
+// document — `frappe.get_doc`, append to `boxes`, `save` — so two concurrent
+// scans can both read the same child table and the second save drops the first
+// box. That risk is unchanged by the Delivery Note moving to close_session; if
+// anything it matters more, since the note is now built from exactly these rows.
+// A distinct key from 'packing' and 'grading' so the flows do not block.
 async function scanBox(p: { session: string; boxLabel: string }): Promise<ScanBoxResult> {
     return serializeByKey('dispatch', async () => {
         const m = await call('scan_box', { session: p.session, box_label: p.boxLabel });
@@ -82,9 +83,6 @@ async function scanBox(p: { session: string; boxLabel: string }): Promise<ScanBo
             customer: str(m.customer),
             boxesLoaded: num(m.boxes_loaded),
             boxesTotal: num(m.boxes_total),
-            orderComplete: m.order_complete === true,
-            deliveryNote: str(m.delivery_note),
-            deliveryNoteError: str(m.delivery_note_error),
             message: typeof m.message === 'string' ? m.message : 'Box scanned',
         };
     });
@@ -103,6 +101,7 @@ async function closeSession(session: string): Promise<CloseSessionResult> {
         totalBoxes: num(m.total_boxes),
         ordersCompleted: num(m.orders_completed),
         deliveryNotes: strList(m.delivery_notes),
+        deliveryNoteErrors: strList(m.delivery_note_errors),
     };
 }
 

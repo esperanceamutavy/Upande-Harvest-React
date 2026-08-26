@@ -37,20 +37,13 @@ export interface ScanBoxResult {
     onSession: string | null;
     salesOrder: string | null;
     customer: string | null;
+    /**
+     * Progress across the WHOLE order, not this session — "3 of 11" tells a
+     * loader how much of the order is still to come, including boxes another
+     * truck may take.
+     */
     boxesLoaded: number;
     boxesTotal: number;
-    /**
-     * THE MOMENT THAT MATTERS. True when this scan completed an order: a
-     * Delivery Note has been submitted and stock has left XFL Graded Sold.
-     */
-    orderComplete: boolean;
-    deliveryNote: string | null;
-    /**
-     * Set when the note could not be created or submitted. This is a WARN, not
-     * an error — the box IS loaded and the scan succeeded. Only the paperwork
-     * needs a human.
-     */
-    deliveryNoteError: string | null;
     message: string;
 }
 
@@ -58,10 +51,26 @@ export interface RemoveBoxResult {
     boxesOnSession: number;
 }
 
+/**
+ * THE MOMENT STOCK MOVES. Closing is what raises the paperwork: one Delivery
+ * Note per Sales Order, covering exactly the boxes this session carried, each
+ * created AND SUBMITTED.
+ *
+ * An order shipping across two trucks therefore produces TWO Delivery Notes,
+ * one per session — and that is intended. Each describes a real departure, and
+ * ERPNext accumulates `per_delivered` across them. Before 2026-08-26 the note
+ * was raised by the scan that completed an order, so a split order's first
+ * truck left with no document behind it at all.
+ */
 export interface CloseSessionResult {
     totalBoxes: number;
     ordersCompleted: number;
     deliveryNotes: string[];
+    /**
+     * Orders whose note could not be created or submitted. WARN, not error:
+     * the boxes went out either way. Only the paperwork needs a human.
+     */
+    deliveryNoteErrors: string[];
 }
 
 /** A box row already on the session, as returned by `get_session`. */
