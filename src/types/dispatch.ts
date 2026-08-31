@@ -90,3 +90,38 @@ export interface SessionState {
     boxes: SessionBox[];
     deliveryNotes: string[];
 }
+
+// ── Manifest ───────────────────────────────────────────────────────────────
+// What is expected on the truck, with the count falling as boxes are scanned.
+//
+// Customer and consignee are resolved from the SALES ORDER, not the Box Label:
+// Box Label.consignee is only set by the sync hook, so older labels have none.
+
+export interface ManifestOrder {
+    salesOrder: string;
+    totalBoxes: number;
+    loadedBoxes: number;
+}
+
+export interface ManifestCustomer {
+    customer: string;
+    consignee: string | null;
+    totalBoxes: number;
+    loadedBoxes: number;
+    remainingBoxes: number;
+    orders: ManifestOrder[];
+}
+
+export interface Manifest {
+    deliveryDate: string | null;
+    /**
+     * ALREADY SORTED by `remaining_boxes` descending — whoever still has boxes
+     * outstanding is at the top. Not re-sorted client-side.
+     *
+     * A customer at zero remaining STAYS in the list and reads as complete.
+     * Dropping them would shrink the manifest as work finishes, which is
+     * exactly when a loader wants confirmation rather than a vanishing row.
+     */
+    customers: ManifestCustomer[];
+    totals: { totalBoxes: number; loadedBoxes: number; remainingBoxes: number };
+}

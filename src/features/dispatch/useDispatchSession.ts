@@ -1,9 +1,11 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
 import { serializeByKey } from '../../lib/serializeByKey';
 import type {
     CloseSessionResult,
+    Manifest,
+    ManifestCustomer,
     OpenSessionResult,
     RemoveBoxResult,
     ScanBoxResult,
@@ -128,6 +130,47 @@ async function getSession(session: string): Promise<SessionState> {
         boxes: rows.map(toBox).filter((b) => b.boxLabel.length > 0).reverse(),
         deliveryNotes: strList(m.delivery_notes),
     };
+}
+
+function toManifestCustomer(row: unknown): ManifestCustomer {
+    const r = (row ?? {}) as Record<string, unknown>;
+    const orders = Array.isArray(r.orders) ? r.orders : [];
+    return {
+        customer: String(r.customer ?? 'Unknown'),
+        consignee: str(r.consignee),
+        totalBoxes: num(r.total_boxes),
+        loadedBoxes: num(r.loaded_boxes),
+        remainingBoxes: num(r.remaining_boxes),
+        orders: (orders as Record<string, unknown>[]).map((o) => ({
+            salesOrder: String(o.sales_order ?? ''),
+            totalBoxes: num(o.total_boxes),
+            loadedBoxes: num(o.loaded_boxes),
+        })),
+    };
+}
+
+/** The manifest for a delivery date. Defaults to TOMORROW server-side. */
+async function fetchManifest(deliveryDate?: string | null): Promise<Manifest> {
+    const m = await call('get_manifest', deliveryDate ? { delivery_date: deliveryDate } : {});
+    const rows = Array.isArray(m.customers) ? m.customers : [];
+    const t = (m.totals ?? {}) as Record<string, unknown>;
+    return {
+        deliveryDate: str(m.delivery_date),
+        // Server order preserved — remaining descending, worst first.
+        customers: rows.map(toManifestCustomer),
+        totals: {
+            totalBoxes: num(t.total_boxes),
+            loadedBoxes: num(t.loaded_boxes),
+            remainingBoxes: num(t.remaining_boxes),
+        },
+    };
+}
+
+export function useManifest(deliveryDate?: string | null) {
+    return useQuery({
+        queryKey: ['dispatch-manifest', deliveryDate ?? 'default'],
+        queryFn: () => fetchManifest(deliveryDate),
+    });
 }
 
 export const useOpenSession = () => useMutation({ mutationFn: openSession });

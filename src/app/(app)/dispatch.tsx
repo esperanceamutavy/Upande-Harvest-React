@@ -4,6 +4,7 @@ import { FileText, QrCode, Trash2 } from 'lucide-react-native';
 
 import {
   useCloseSession,
+  useManifest,
   useOpenSession,
   useRemoveBox,
   useScanBox,
@@ -18,7 +19,7 @@ import { Card, Notice, type NoticeTone } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
 import { Screen } from '../../components/ui/Screen';
 import { colors, radii, spacing } from '../../components/ui/theme';
-import type { ScanBoxResult } from '../../types/dispatch';
+import type { ManifestCustomer, ScanBoxResult } from '../../types/dispatch';
 
 // Dispatch — boxes are scanned onto a truck, and the paperwork follows.
 //
@@ -72,6 +73,8 @@ export default function DispatchScreen() {
   const scanMut = useScanBox();
   const removeMut = useRemoveBox();
   const closeMut = useCloseSession();
+  // Defaults to TOMORROW server-side — packing runs a day ahead of the flight.
+  const manifest = useManifest();
 
   const [truckInput, setTruckInput] = useState('');
   const [driverInput, setDriverInput] = useState('');
@@ -274,6 +277,9 @@ export default function DispatchScreen() {
         detail: [describe(res), res.customer, res.salesOrder].filter(Boolean).join(' · '),
         tone: 'info',
       });
+
+      // Counts fall live: this box just flipped `loaded`.
+      void manifest.refetch();
     } catch (e) {
       fail(extractFrappeError(e));
     } finally {
@@ -299,6 +305,8 @@ export default function DispatchScreen() {
               try {
                 await removeMut.mutateAsync({ session, boxLabel });
                 setEntries((prev) => prev.filter((r) => r.boxLabel !== boxLabel));
+                // The box went back to unloaded, so the count rises again.
+                void manifest.refetch();
                 playSubmit();
                 setFeedback({ tone: 'info', text: `${boxLabel} removed from the session.` });
               } catch (e) {
@@ -448,6 +456,14 @@ export default function DispatchScreen() {
         </Card>
       ) : null}
 
+      {manifest.data && manifest.data.customers.length > 0 ? (
+        <ManifestCard
+          customers={manifest.data.customers}
+          totals={manifest.data.totals}
+          deliveryDate={manifest.data.deliveryDate}
+        />
+      ) : null}
+
       {session ? (
         <Card title="Scan box">
           <Field label="Box label">
@@ -513,6 +529,61 @@ export default function DispatchScreen() {
   );
 }
 
+/**
+ * What is expected on the truck, counting down as boxes are scanned.
+ *
+ * Server-sorted by remaining descending, so whoever still has boxes is at the
+ * top; the client does not re-sort. A customer at zero remaining STAYS listed
+ * and reads as "Complete" — the manifest shrinking as work finishes is exactly
+ * the wrong feedback, since that is when a loader wants confirmation.
+ */
+function ManifestCard({
+  customers,
+  totals,
+  deliveryDate,
+}: {
+  customers: ManifestCustomer[];
+  totals: { totalBoxes: number; loadedBoxes: number; remainingBoxes: number };
+  deliveryDate: string | null;
+}) {
+  const done = totals.remainingBoxes === 0;
+  return (
+    <Card title={deliveryDate ? `Expected ${deliveryDate}` : 'Expected on the truck'}>
+      <View style={styles.manifestHead}>
+        <Text style={styles.manifestTotal}>
+          {totals.loadedBoxes} of {totals.totalBoxes} loaded
+        </Text>
+        <Text style={[styles.manifestRemaining, done && styles.manifestDone]}>
+          {done ? 'All loaded' : `${totals.remainingBoxes} to go`}
+        </Text>
+      </View>
+
+      <View style={styles.rows}>
+        {customers.map((c) => {
+          const complete = c.remainingBoxes === 0;
+          return (
+            <View key={c.customer} style={styles.manifestRow}>
+              <View style={styles.manifestMain}>
+                <Text style={styles.manifestCustomer} numberOfLines={1}>
+                  {c.customer}
+                </Text>
+                <Text style={styles.manifestDetail} numberOfLines={1}>
+                  {[c.consignee, `${c.loadedBoxes} of ${c.totalBoxes} boxes`]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+              </View>
+              <Text style={[styles.manifestCount, complete && styles.manifestDone]}>
+                {complete ? 'Complete' : `${c.remainingBoxes} left`}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    </Card>
+  );
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.detailRow}>
@@ -548,6 +619,28 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: colors.surface,
   },
+  manifestHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  manifestTotal: { fontSize: 16, fontWeight: '700', color: colors.text },
+  manifestRemaining: { fontSize: 14, fontWeight: '600', color: colors.muted },
+  manifestDone: { color: colors.success },
+  manifestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.borderLight,
+  },
+  manifestMain: { flex: 1, gap: 2 },
+  manifestCustomer: { fontSize: 14, fontWeight: '600', color: colors.text },
+  manifestDetail: { fontSize: 12, color: colors.muted },
+  manifestCount: { fontSize: 13, fontWeight: '700', color: colors.text, textAlign: 'right' },
   logRow: {
     flexDirection: 'row',
     alignItems: 'center',
