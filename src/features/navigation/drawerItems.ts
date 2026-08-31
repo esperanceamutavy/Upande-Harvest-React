@@ -8,6 +8,7 @@ import {
   PackageOpen,
   PackagePlus,
   Search,
+  Sprout,
   Settings,
   Monitor,
   XCircle,
@@ -40,6 +41,7 @@ export const WORKFLOW_ITEMS: DrawerItem[] = [
   { label: 'Packing', icon: Box, route: '/packing' },
   { label: 'Dispatch', icon: Truck, route: '/dispatch' },
   { label: 'Traceability', icon: Search, route: '/traceability' },
+  { label: 'Greenhouse Flow', icon: Sprout, route: '/greenhouse-flow' },
   //
   // Still to come (RESTYLE_PLAN.md §8):
   //   Staging → Boxes → '/staging'

@@ -14,6 +14,8 @@ import { Menu } from 'lucide-react-native';
 
 import { useAuthStore } from '../../stores/auth';
 import { useDashboardStats } from '../../features/dashboard/useDashboardStats';
+import { useGreenhouseFlow } from '../../features/greenhouse/useGreenhouseFlow';
+import { formatGap } from '../../features/greenhouse/gap';
 import { WORKFLOW_ITEMS } from '../../features/navigation/drawerItems';
 import { useDrawer } from '../../features/navigation/drawerContext';
 import { Button } from '../../components/ui/Button';
@@ -39,6 +41,8 @@ function entriesLabel(entries: number | null): string | undefined {
 
 export default function Dashboard() {
   const router = useRouter();
+  // Today's gap only — the full 32-greenhouse breakdown lives on its own screen.
+  const flow = useGreenhouseFlow('today');
   const fullName = useAuthStore((s) => s.fullName);
   const firstName = useMemo(() => (fullName ?? '').split(' ')[0] || 'there', [fullName]);
 
@@ -87,6 +91,23 @@ export default function Dashboard() {
               value={fmt(data?.receivedStems ?? null)}
               unit="stems"
             />
+            {/* The one greenhouse-flow number worth a glance: stems received
+                and not yet shelved. Taps through to the per-greenhouse list,
+                which is 32 rows and has no business in the bento. */}
+            <Pressable
+              onPress={() => router.push('/greenhouse-flow' as never)}
+              style={({ pressed }) => [styles.tilePress, pressed && styles.tilePressed]}
+            >
+              <StatTile
+                tone="stone"
+                label="NOT YET SHELVED"
+                value={
+                  flow.data ? formatGap(flow.data.totals.gapStems).text : fmt(null)
+                }
+                sublabel="tap for greenhouses"
+              />
+            </Pressable>
+
             <View style={styles.row}>
               <StatTile tone="blue" label="SHELVED" value={fmt(data?.shelvedStems ?? null)} unit="stems" />
               <StatTile tone="stone" label="TRANSFERRED" value={fmt(data?.bucketTransferStems ?? null)} unit="stems" />
@@ -150,6 +171,8 @@ const styles = StyleSheet.create({
   headerDate: { fontFamily: fontFamily.regular, fontSize: fontSize.xs, color: colors.muted, marginBottom: 2 },
   headerName: { fontFamily: fontFamily.bold, fontSize: fontSize.xxl, color: colors.primary },
 
+  tilePress: { width: '100%' },
+  tilePressed: { opacity: 0.7 },
   row: { flexDirection: 'row', gap: spacing.sm },
 
   stateBox: {
