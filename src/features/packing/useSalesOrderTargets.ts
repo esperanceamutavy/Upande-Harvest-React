@@ -53,14 +53,21 @@ async function fetchSalesOrderTargets({
   const items = Array.isArray(doc.items) ? (doc.items as Record<string, unknown>[]) : [];
   if (items.length === 0) throw new Error(`Sales Order ${salesOrder} has no line items`);
 
-  // Each SO line carries its own OPL, so the line is matched on custom_opl.
-  // Falling back to the sole line keeps single-line orders working if that
-  // field is ever unset.
-  const row =
-    items.find((r) => r.custom_opl != null && String(r.custom_opl) === oplName) ??
-    (items.length === 1 ? items[0] : undefined);
+  // A mix puts SEVERAL lines on ONE OPL, so collect them all. Straight boxes
+  // can too (OPL-2026-03432 has three Madam Red lines at different lengths),
+  // which is why the branch below keys on custom_mixed_box, not on count.
+  const oplRows = items.filter(
+    (r) => r.custom_opl != null && String(r.custom_opl) === oplName,
+  );
+  const rows = oplRows.length > 0 ? oplRows : items.length === 1 ? [items[0]] : [];
 
-  if (!row) throw new Error(`No Sales Order line on ${salesOrder} points at ${oplName}`);
+  if (rows.length === 0)
+    throw new Error(`No Sales Order line on ${salesOrder} points at ${oplName}`);
+
+  // Identity fields come off the first line — order-level in practice, and
+  // identical across a mix group.
+  const row = rows[0];
+  const isMixed = rows.some((r) => Number(r.custom_mixed_box ?? 0) === 1);
 
   // `custom_customer_code` is a LINK: the stored value is a Customer Code record
   // NAME and the code that goes on the box is that record's `code`. They diverge
@@ -88,11 +95,42 @@ async function fetchSalesOrderTargets({
 
   const uom = String(row.uom ?? '');
   const conversionFactor = Number(row.conversion_factor ?? 0) || 1;
-  const qty = Number(row.qty ?? 0);
-  const packRate = Number(row.custom_packrate ?? 0);
-  const boxCount = Number(row.custom_number_of_boxes ?? 0);
+  const soIsBunchUom = /^\s*bunch\s*\(/i.test(uom);
 
-  if (!(packRate > 0)) throw new Error(`Sales Order line for ${oplName} has no pack rate`);
+  // Mixed box: the cap is the SUM across the mix group. custom_packrate is 0
+  // on mixed lines and must stay so - it means "whole box" and no single line
+  // knows that number. Writing a per-variety figure there closed a box at
+  // 10 of 20 stems and reported it fully packed. custom_packrate_mixed_box is
+  // always STEMS, so divide into the line's uom before resolveTargetUnits,
+  // whose contract is that packRate and qty arrive in the SO line's uom.
+  let packRate: number;
+  let qty: number;
+
+  if (isMixed) {
+    const stemsPerBox = rows.reduce(
+      (sum, r) => sum + Number(r.custom_packrate_mixed_box ?? 0),
+      0,
+    );
+    packRate = soIsBunchUom ? stemsPerBox / conversionFactor : stemsPerBox;
+    qty = rows.reduce((sum, r) => sum + Number(r.qty ?? 0), 0);
+  } else {
+    packRate = Number(row.custom_packrate ?? 0);
+    qty = Number(row.qty ?? 0);
+  }
+
+  // A mix spans lines, so take the largest rather than the first.
+  const boxCount = rows.reduce(
+    (max, r) => Math.max(max, Number(r.custom_number_of_boxes ?? 0)),
+    0,
+  );
+
+  if (!(packRate > 0)) {
+    throw new Error(
+      isMixed
+        ? `Mixed box lines for ${oplName} have no packrate - check custom_packrate_mixed_box on the Sales Order`
+        : `Sales Order line for ${oplName} has no pack rate`,
+    );
+  }
 
   // Unit resolution lives in targets.ts so it can be tested without a network
   // call — see targets.test.ts, pinned against both live orders.

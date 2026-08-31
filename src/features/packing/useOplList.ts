@@ -396,9 +396,10 @@ function toItem(
 }
 
 async function fetchOplList(range: OplDateFilter): Promise<OplListResult> {
-  // Mixed-box OPLs are excluded at the query, not filtered in the UI: mix is
-  // deferred, and offering one would strand a packer mid-box (§8.3).
-  const baseFilters: Filter[] = [['custom_is_mixed_box_pick_list', '=', 0]];
+  // Mixed-box OPLs are INCLUDED. A mix now arrives as one pick list whose rows
+  // share a custom_box_id, so a packer still gets a whole box rather than being
+  // stranded mid-box — the concern that kept them out (§8.3).
+  const baseFilters: Filter[] = [];
   const window = deliveryWindow(range);
 
   // ── All time: skip step 1 entirely ──────────────────────────────────────
