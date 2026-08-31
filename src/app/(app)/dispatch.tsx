@@ -4,6 +4,7 @@ import { FileText, QrCode, Trash2 } from 'lucide-react-native';
 
 import {
   useCloseSession,
+  useGetSession,
   useManifest,
   useOpenSession,
   useRemoveBox,
@@ -54,6 +55,18 @@ interface LogRow {
   detail: string;
   tone: NoticeTone;
   time: string;
+  /**
+   * The session that actually HOLDS this box, when it is not this one.
+   *
+   * Set only on an `already_loaded` scan, where the server reports which
+   * session has it. Remove must target that session: sending the current one
+   * makes the server throw "Box X is not on session Y", which is exactly how
+   * the button was failing — the box was stranded on an abandoned session from
+   * an earlier truck and remove kept aiming at the new one.
+   */
+  onSession: string | null;
+  /** Truck reg for `onSession`, so the dialog can name it. Null if unresolved. */
+  onTruck: string | null;
 }
 
 /**
@@ -73,6 +86,8 @@ export default function DispatchScreen() {
   const scanMut = useScanBox();
   const removeMut = useRemoveBox();
   const closeMut = useCloseSession();
+  // Resolves the truck reg of a session holding a box scanned onto another one.
+  const sessionMut = useGetSession();
   // Defaults to TOMORROW server-side — packing runs a day ahead of the flight.
   const manifest = useManifest();
 
@@ -252,18 +267,37 @@ export default function DispatchScreen() {
         // lorry is a different problem from a double scan, and saying "already
         // on this truck" for both would send the wrong box out.
         const elsewhere = res.onSession != null && res.onSession !== session;
+
+        // Resolve the holding truck so the remove dialog can name it — the
+        // server returns the session, and a reg means more to a loader than
+        // DSP-2026-01279. Only on the elsewhere path, so it costs nothing in
+        // the normal double-scan case.
+        let onTruck: string | null = null;
+        if (elsewhere && res.onSession) {
+          try {
+            onTruck = (await sessionMut.mutateAsync(res.onSession)).truckReg;
+          } catch {
+            // Non-fatal: the dialog falls back to naming the session.
+            onTruck = null;
+          }
+        }
+
         if (elsewhere) {
           fail(
-            `${res.boxLabel} is already loaded on ANOTHER session (${res.onSession}). `
-              + 'Do not put it on this truck.',
+            `${res.boxLabel} is already loaded on ANOTHER truck`
+              + `${onTruck ? ` (${onTruck})` : ''}. Do not put it on this one.`,
           );
         } else {
           warn(`${res.boxLabel} is already on this truck — scanned twice.`);
         }
         log({
           boxLabel: res.boxLabel,
-          detail: elsewhere ? `Already on ${res.onSession}` : 'Already on this truck',
+          detail: elsewhere
+            ? `Already on ${onTruck ?? res.onSession}`
+            : 'Already on this truck',
           tone: elsewhere ? 'danger' : 'warn',
+          onSession: elsewhere ? res.onSession : null,
+          onTruck,
         });
         return;
       }
@@ -276,6 +310,8 @@ export default function DispatchScreen() {
         boxLabel: res.boxLabel,
         detail: [describe(res), res.customer, res.salesOrder].filter(Boolean).join(' · '),
         tone: 'info',
+        onSession: null,
+        onTruck: null,
       });
 
       // Counts fall live: this box just flipped `loaded`.
@@ -289,12 +325,26 @@ export default function DispatchScreen() {
     }
   }
 
-  function confirmRemove(boxLabel: string) {
+  function confirmRemove(row: LogRow) {
     if (!session) return;
+
+    // TARGET THE SESSION THAT HOLDS THE BOX, not the one on screen. On an
+    // already_loaded row those differ, and sending the current session is what
+    // made remove fail: the server throws "Box X is not on session Y" because
+    // the box is stranded on an earlier, still-open session.
+    const target = row.onSession ?? session;
+    const elsewhere = target !== session;
+    const where = row.onTruck ?? target;
+
     Alert.alert(
-      'Remove box?',
-      `${boxLabel} will be taken off this session. This is refused once the order's `
-        + 'Delivery Note exists.',
+      elsewhere ? 'Remove from another truck?' : 'Remove box?',
+      elsewhere
+        // Name the truck: this box is NOT coming off the one in front of them.
+        ? `${row.boxLabel} is loaded on ${where}, not this truck. Removing it takes `
+          + `it off ${where} and frees it to be scanned here. This is refused once `
+          + "that order's Delivery Note exists."
+        : `${row.boxLabel} will be taken off this session. This is refused once the `
+          + "order's Delivery Note exists.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -303,12 +353,17 @@ export default function DispatchScreen() {
           onPress: () => {
             void (async () => {
               try {
-                await removeMut.mutateAsync({ session, boxLabel });
-                setEntries((prev) => prev.filter((r) => r.boxLabel !== boxLabel));
+                await removeMut.mutateAsync({ session: target, boxLabel: row.boxLabel });
+                setEntries((prev) => prev.filter((r) => r.boxLabel !== row.boxLabel));
                 // The box went back to unloaded, so the count rises again.
                 void manifest.refetch();
                 playSubmit();
-                setFeedback({ tone: 'info', text: `${boxLabel} removed from the session.` });
+                setFeedback({
+                  tone: 'info',
+                  text: elsewhere
+                    ? `${row.boxLabel} removed from ${where}. Scan it to load it here.`
+                    : `${row.boxLabel} removed from the session.`,
+                });
               } catch (e) {
                 fail(extractFrappeError(e));
               }
@@ -502,7 +557,7 @@ export default function DispatchScreen() {
                 {/* Removal is only possible while the session is open. */}
                 {session ? (
                   <Pressable
-                    onPress={() => confirmRemove(row.boxLabel)}
+                    onPress={() => confirmRemove(row)}
                     disabled={busy}
                     hitSlop={8}
                     style={styles.removeBtn}
