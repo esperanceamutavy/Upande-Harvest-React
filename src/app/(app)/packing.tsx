@@ -16,6 +16,7 @@ import { useSalesOrderTargets } from '../../features/packing/useSalesOrderTarget
 import { useExistingPack } from '../../features/packing/useExistingPack';
 import { formatBoxRanges, resumePlan } from '../../features/packing/resume';
 import { compareLength, displayLength } from '../../features/packing/lengths';
+import { filterOpls } from '../../features/packing/oplSearch';
 import { useBunchDetails } from '../../features/packing/useBunchDetails';
 import {
   classifyPackError,
@@ -158,6 +159,10 @@ export default function PackingScreen() {
   // Status filters client-side off the already-fetched list, so switching it is
   // instant and does not refetch.
   const [status, setStatus] = useState<PackStatus>('to_pack');
+  // Search does the same, over the fields the bulk fetches already put in
+  // memory — see oplSearch.ts. No query, and it keeps working offline once the
+  // list is on screen.
+  const [search, setSearch] = useState('');
   const oplList = useOplList(range);
   const oplMut = useOrderPickList();
   const targetsMut = useSalesOrderTargets();
@@ -534,16 +539,36 @@ export default function PackingScreen() {
 
   // ── STEP 1: picker ────────────────────────────────────────────────────────
   if (!session) {
-    const visible = (oplList.data?.items ?? []).filter((i) => i.packStatus === status);
+    const byStatus = (oplList.data?.items ?? []).filter((i) => i.packStatus === status);
+    // THREE filters now, applied in the same order the card presents them.
+    // `searching` distinguishes "nothing matched what you typed" from "nothing
+    // is due in this window" — a packer who mistypes must not conclude the
+    // order is missing.
+    const visible = filterOpls(byStatus, search);
+    const searching = search.trim().length > 0;
 
     return (
       <Screen title="Packing">
-        <Card title="Pick list date">
-          <Segmented value={range} options={DATE_OPTIONS} onChange={setRange} />
-        </Card>
-
-        <Card title="Packing status">
-          <Segmented value={status} options={STATUS_OPTIONS} onChange={setStatus} />
+        <Card title="Find a pick list">
+          <View style={styles.filters}>
+            <TextInput
+              style={styles.input}
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Code, consignee, customer, OPL, variety…"
+              placeholderTextColor={colors.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+            <Field label="Delivery date">
+              <Segmented value={range} options={DATE_OPTIONS} onChange={setRange} />
+            </Field>
+            <Field label="Packing status">
+              <Segmented value={status} options={STATUS_OPTIONS} onChange={setStatus} />
+            </Field>
+          </View>
         </Card>
 
         {loadingOpl ? (
@@ -563,15 +588,21 @@ export default function PackingScreen() {
         ) : oplList.error ? (
           <Notice tone="danger">{extractFrappeError(oplList.error)}</Notice>
         ) : visible.length === 0 ? (
-          <Card title="No pick lists">
+          <Card title={searching ? 'No match' : 'No pick lists'}>
             <Text style={styles.body}>
-              {oplList.data?.notice ??
-                `No ${STATUS_OPTIONS.find((o) => o.value === status)?.label.toLowerCase()} pick lists for orders due in this window. Try another status or a wider date range — mixed-box pick lists are excluded.`}
+              {searching
+                ? `Nothing matches “${search.trim()}” in this date range and status. Check the spelling, or clear the search — the pick list may be under a different date or status.`
+                : (oplList.data?.notice ??
+                  `No ${STATUS_OPTIONS.find((o) => o.value === status)?.label.toLowerCase()} pick lists for orders due in this window. Try another status or a wider date range — mixed-box pick lists are excluded.`)}
             </Text>
           </Card>
         ) : (
-          // Count reflects BOTH filters, not the unfiltered fetch.
-          <Card title={`${visible.length} pick lists`}>
+          // Count reflects ALL THREE filters, not the unfiltered fetch.
+          <Card
+            title={`${visible.length} pick list${visible.length === 1 ? '' : 's'}${
+              searching ? ` matching “${search.trim()}”` : ''
+            }`}
+          >
             <View style={styles.list}>
               {visible.map((item) => (
                 <OplPickerRow
@@ -907,6 +938,9 @@ function EntryRow({
 }
 
 const styles = StyleSheet.create({
+  // Search sits above the two Segmented rows in one card, so the three filters
+  // read as one control rather than three stacked cards.
+  filters: { gap: spacing.md },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
