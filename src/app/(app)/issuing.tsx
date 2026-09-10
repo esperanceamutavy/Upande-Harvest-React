@@ -53,6 +53,20 @@ const MODE_OPTIONS = [
 
 const MAX_LOG_ROWS = 12;
 
+// TEMPORARY POLICY (2026-09-03): a bucket that is on a shelf may be issued even
+// with no Pick List allocation, without the packer confirming each one. Plenty
+// of buckets are shelved carrying a variety no open order needs, and holding
+// those on the floor was stopping dispatch.
+//
+// The safety net is server-side, not here: issue_bucket_no_order refuses a
+// bucket that is not currently on a shelf, which is what prevents a double
+// issue — issuing deletes the Shelf Item rows, so a second scan of the same
+// load is refused while a genuinely re-shelved new load passes.
+//
+// TO RE-IMPOSE ALLOCATION: set this to false. The confirm-first card below
+// returns and unallocated buckets stop being issued on a single scan.
+const ALLOW_UNALLOCATED_ISSUE = true;
+
 interface IssueLogRow {
   id: string;
   bucketId: string;
@@ -125,10 +139,13 @@ export default function IssuingScreen() {
       const shelf =
         res.removedFromShelf != null ? ` · ${res.removedFromShelf} shelf row(s) cleared` : '';
       setFeedback({ tone: 'success', text: `${res.message}${shelf}` });
+      addLog(bucketId, 'Issued (no order)', `${res.message}${shelf}`, 'warn');
     } catch (e) {
       playError();
       haptics.medium();
-      setFeedback({ tone: 'danger', text: extractFrappeError(e) });
+      const message = extractFrappeError(e);
+      setFeedback({ tone: 'danger', text: message });
+      addLog(bucketId, 'Failed', message, 'danger');
     } finally {
       resetBucket();
     }
@@ -228,6 +245,11 @@ export default function IssuingScreen() {
       const info = await allocationMut.mutateAsync(bucketId);
 
       if (info.status === 'not_allocated') {
+        if (ALLOW_UNALLOCATED_ISSUE) {
+          // Straight through — the server enforces "must be on a shelf".
+          await confirmIssueNoOrder(bucketId);
+          return;
+        }
         setPendingUnallocated(bucketId);
         setFeedback({
           tone: 'warn',
