@@ -197,6 +197,25 @@ export interface PackingSession {
   resume: ResumeState;
 }
 
+/**
+ * One variety inside a MIXED BUNCH (bouquet).
+ *
+ * A bouquet is a single bunch built from several varieties — 4 Madam Red +
+ * 3 Athena + 3 Limassol Spray as one Bunch(10). The label carries the whole
+ * recipe in `Bunch QR Code.components`, and `item_code` names only the FIRST
+ * of them, so anything that needs to know what is physically in the bunch must
+ * read these rows rather than the header.
+ */
+export interface BunchComponent {
+  /** The VARIANT, e.g. "Madam Red-40CM". */
+  variety: string;
+  /** `Item.variant_of` for `variety` — what an OPL row's item_code holds. */
+  variantParent: string;
+  /** Stems of this variety in ONE bouquet. */
+  stems: number;
+  stemLength: string;
+}
+
 /** A bunch resolved from its QR, ready to validate and submit. */
 export interface BunchDetails {
   bunchId: string;
@@ -212,6 +231,15 @@ export interface BunchDetails {
   farm: string | null;
   /** Parsed out of `bunchUom` with the server's own paren rule. */
   stemsPerBunch: number;
+
+  // ── Mixed bunch (bouquet) ─────────────────────────────────────────────────
+  /** `custom_mixed_bunch`. When true, `itemCode` names only the first of
+   *  several varieties and `components` is the truth. */
+  isMixedBunch: boolean;
+  /** `custom_bunch_name`, e.g. "Pretty Pastell". Null on a mono bunch. */
+  bunchName: string | null;
+  /** The recipe. Empty on a mono bunch. */
+  components: BunchComponent[];
 }
 
 export interface PackBunchPayload {

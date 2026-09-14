@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
 import { parseStemsPerBunch } from './targets';
-import type { BunchDetails } from '../../types/packing';
+import type { BunchComponent, BunchDetails } from '../../types/packing';
 
 // Resolves a scanned bunch id into everything the payload and Rule 3 need.
 //
@@ -55,21 +55,73 @@ async function resolveVariantParent(itemCode: string): Promise<string> {
   return parent;
 }
 
+/** The recipe rows of a bouquet, resolved to their template varieties.
+ *
+ *  Child doctype, so `parent=Bunch QR Code` is REQUIRED on the request — Frappe
+ *  answers PermissionError without it even when the parent is readable. Same
+ *  rule as Pick List Item in useOplList.
+ */
+async function fetchComponents(bunchId: string): Promise<BunchComponent[]> {
+  const res = await apiClient.get<{ data?: Record<string, unknown>[] }>(
+    `/api/resource/${encodeURIComponent('Bunch Component')}`,
+    {
+      params: {
+        fields: JSON.stringify(['variety', 'stems', 'stem_length']),
+        filters: JSON.stringify([['parent', '=', bunchId]]),
+        parent: 'Bunch QR Code',
+        limit_page_length: 0,
+      },
+    },
+  );
+  const rows = res.data?.data ?? [];
+
+  const out: BunchComponent[] = [];
+  for (const r of rows) {
+    const variety = String(r.variety ?? '').trim();
+    if (!variety) continue;
+    out.push({
+      variety,
+      variantParent: await resolveVariantParent(variety),
+      stems: Number(r.stems ?? 0) || 0,
+      stemLength: String(r.stem_length ?? '').trim(),
+    });
+  }
+  return out;
+}
+
 async function fetchBunchDetails(bunchId: string): Promise<BunchDetails> {
   const bunch = await getValue('Bunch QR Code', bunchId, [
     'item_code',
     'bunch_size',
     'stem_length',
     'farm',
+    'custom_mixed_bunch',
+    'custom_bunch_name',
   ]);
   if (!bunch) throw new Error(`Bunch ${bunchId} not found`);
 
   const itemCode = String(bunch.item_code ?? '');
   const bunchUom = String(bunch.bunch_size ?? '');
-  const stemLength = String(bunch.stem_length ?? '');
+  const isMixedBunch = Number(bunch.custom_mixed_bunch ?? 0) === 1;
+  const bunchName =
+    bunch.custom_bunch_name != null && String(bunch.custom_bunch_name).trim().length > 0
+      ? String(bunch.custom_bunch_name).trim()
+      : null;
+
+  // A BOUQUET'S LENGTH LIVES ON ITS COMPONENTS, not always on the header.
+  // Falling back to the first component keeps a label usable when only the
+  // recipe rows carry a length.
+  const components = isMixedBunch ? await fetchComponents(bunchId) : [];
+  const headerLength = String(bunch.stem_length ?? '').trim();
+  const stemLength = headerLength || (components.length > 0 ? components[0].stemLength : '');
 
   if (!itemCode || !bunchUom || !stemLength) {
     throw new Error(`Bunch ${bunchId} is missing variety, size or stem length`);
+  }
+
+  if (isMixedBunch && components.length === 0) {
+    // Refusing beats packing a bouquet whose recipe nobody can see.
+    throw new Error(`Bunch ${bunchId} is a mixed bunch but carries no recipe`);
   }
 
   const stemsPerBunch = parseStemsPerBunch(bunchUom);
@@ -85,7 +137,18 @@ async function fetchBunchDetails(bunchId: string): Promise<BunchDetails> {
   // farm and not from the OPL (whose own `farm` is null on live documents).
   const farm = bunch.farm != null && String(bunch.farm).length > 0 ? String(bunch.farm) : null;
 
-  return { bunchId, itemCode, variantParent, bunchUom, stemLength, farm, stemsPerBunch };
+  return {
+    bunchId,
+    itemCode,
+    variantParent,
+    bunchUom,
+    stemLength,
+    farm,
+    stemsPerBunch,
+    isMixedBunch,
+    bunchName,
+    components,
+  };
 }
 
 export function useBunchDetails() {

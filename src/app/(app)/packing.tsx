@@ -16,6 +16,7 @@ import { useSalesOrderTargets } from '../../features/packing/useSalesOrderTarget
 import { useExistingPack } from '../../features/packing/useExistingPack';
 import { formatBoxRanges, resumePlan } from '../../features/packing/resume';
 import { compareLength, displayLength } from '../../features/packing/lengths';
+import { effectiveStemLength, matchBunchToOpl } from '../../features/packing/bunchMatch';
 import { filterOpls } from '../../features/packing/oplSearch';
 import { useBunchDetails } from '../../features/packing/useBunchDetails';
 import {
@@ -342,12 +343,15 @@ export default function PackingScreen() {
    * too. See RESTYLE_PLAN.md §8.3.
    */
   function validateAgainstOpl(s: PackingSession, bunch: BunchDetails): PackRejection | null {
-    const matchesVariety = (rowItemCode: string) =>
-      rowItemCode === bunch.itemCode || rowItemCode === bunch.variantParent;
+    // MONO matches on its one variety; a BOUQUET has to have EVERY component on
+    // the pick list. Its item_code names only the first of several, so matching
+    // on that alone would wave through a bouquet whose other varieties belong to
+    // a different order. See bunchMatch.ts.
+    if (matchBunchToOpl(bunch, s.opl.rows) !== null) return 'variety-mismatch';
 
-    if (!s.opl.rows.some((r) => matchesVariety(r.itemCode))) return 'variety-mismatch';
-
-    const verdict = compareLength(bunch.stemLength, s.targets.orderLength);
+    // A bouquet is governed by its SHORTEST component: a 40CM stem in a 50CM
+    // order is short however long the rest are.
+    const verdict = compareLength(effectiveStemLength(bunch, compareLength), s.targets.orderLength);
     if (verdict === 'shorter') return 'length-mismatch';
     if (verdict === 'unknown') {
       // Allowed on purpose — a format surprise must not stop a packer.
@@ -403,7 +407,9 @@ export default function PackingScreen() {
         reject(
           bunchId,
           mismatch,
-          `${bunch.itemCode} is not on ${s.opl.name}. Packing it would send stock to the wrong warehouse.`,
+          bunch.isMixedBunch
+            ? `${bunch.bunchName ?? 'That bouquet'} does not belong on ${s.opl.name} — ${(matchBunchToOpl(bunch, s.opl.rows)?.missing ?? []).join(', ')} ${(matchBunchToOpl(bunch, s.opl.rows)?.missing ?? []).length === 1 ? 'is' : 'are'} not on this pick list.`
+            : `${bunch.itemCode} is not on ${s.opl.name}. Packing it would send stock to the wrong warehouse.`,
         );
         return;
       }
