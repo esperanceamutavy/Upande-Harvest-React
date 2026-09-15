@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { CircleCheck, QrCode, TriangleAlert } from 'lucide-react-native';
 
-import { useXfloraReadySaleOrders } from '../../features/issuing/useXfloraReadySaleOrders';
+import {
+  useXfloraReadySaleOrders,
+  type ReadySaleOrder,
+} from '../../features/issuing/useXfloraReadySaleOrders';
 import { useXfloraReadySaleOrderItems } from '../../features/issuing/useXfloraReadySaleOrderItems';
 import { useIssueFromColdstore } from '../../features/issuing/useIssueFromColdstore';
 import { useBucketIssueInfo } from '../../features/issuing/useBucketIssueInfo';
@@ -53,6 +56,9 @@ const MODE_OPTIONS = [
 
 const MAX_LOG_ROWS = 12;
 
+/** Picker rows drawn at once. The count of the rest is shown beneath. */
+const MAX_ORDER_ROWS = 40;
+
 // TEMPORARY POLICY (2026-09-03): a bucket that is on a shelf may be issued even
 // with no Pick List allocation, without the packer confirming each one. Plenty
 // of buckets are shelved carrying a variety no open order needs, and holding
@@ -86,7 +92,6 @@ export default function IssuingScreen() {
   const [mode, setMode] = useState<IssueMode>('scan');
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [orderQuery, setOrderQuery] = useState('');
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [items, setItems] = useState<XfloraReadySaleOrderItem[]>([]);
   const [bucketInput, setBucketInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -101,22 +106,29 @@ export default function IssuingScreen() {
   const isSettingProgrammaticallyRef = useRef(false);
   const isProcessingRef = useRef(false);
   const bucketRef = useRef<TextInput>(null);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const orders = ordersQuery.data ?? [];
   const itemsLoading = fetchItems.isPending;
 
-  useEffect(() => {
-    return () => {
-      if (hideTimer.current) clearTimeout(hideTimer.current);
-    };
-  }, []);
-
-  const suggestions = useMemo(() => {
-    const q = orderQuery.trim().toLowerCase();
+  // Every ready order is on screen; the search field only narrows it. A picker
+  // is searched by what is on the box — the code, the consignee, the customer —
+  // far more often than by an order number nobody has memorised, so all of them
+  // match. Whitespace is squashed on both sides because live customer codes
+  // carry double spaces ("TGW  FT ROSE") that nobody types.
+  const filteredOrders = useMemo(() => {
+    const q = orderQuery.trim().toLowerCase().replace(/\s+/g, ' ');
     if (!q) return orders;
-    return orders.filter((o) => o.toLowerCase().includes(q));
+    return orders.filter((o) =>
+      [o.name, o.customer, o.customerCode, o.consignee]
+        .filter(Boolean)
+        .some((f) => String(f).toLowerCase().replace(/\s+/g, ' ').includes(q)),
+    );
   }, [orders, orderQuery]);
+
+  // Capped so a hundred orders cannot make the screen unscrollable, with the
+  // remainder counted below rather than silently dropped.
+  const visibleOrders = filteredOrders.slice(0, MAX_ORDER_ROWS);
+  const hiddenOrderCount = filteredOrders.length - visibleOrders.length;
 
   function resetBucket() {
     setLoading(false);
@@ -169,10 +181,10 @@ export default function IssuingScreen() {
   }
 
   async function selectOrder(name: string) {
+    // The search text is deliberately LEFT ALONE. It used to be overwritten with
+    // the order name, which collapsed the list to the one order already chosen
+    // and made picking a second one mean clearing the field first.
     setSelectedOrder(name);
-    setOrderQuery(name);
-    setShowSuggestions(false);
-    if (hideTimer.current) clearTimeout(hideTimer.current);
     setItems([]);
     setFeedback(null);
     try {
@@ -388,45 +400,53 @@ export default function IssuingScreen() {
         />
       </Card>
 
-      {/* Order type-ahead — order mode only. Scanning does not need it. */}
+      {/* Order picker — order mode only. Scanning does not need it.
+          The whole list is on screen; the field above only narrows it. */}
       {mode === 'order' ? (
-      <Card title="Select order">
-        <Field label="Sale Order">
-          <View>
+        <Card title="Select order">
+          <Field label="Search">
             <TextInput
               style={styles.input}
               value={orderQuery}
-              onChangeText={(text) => {
-                setOrderQuery(text);
-                setSelectedOrder(null);
-                setItems([]);
-                setShowSuggestions(true);
-                setFeedback(null);
-              }}
-              onFocus={() => setShowSuggestions(true)}
-              onBlur={() => {
-                hideTimer.current = setTimeout(() => setShowSuggestions(false), 150);
-              }}
-              placeholder={ordersQuery.isLoading ? 'Loading orders…' : 'Search sale order…'}
+              onChangeText={setOrderQuery}
+              autoCapitalize="characters"
+              placeholder={
+                ordersQuery.isLoading ? 'Loading orders…' : 'Code, customer, consignee, order…'
+              }
               placeholderTextColor={colors.muted}
               editable={!ordersQuery.isLoading && orders.length > 0}
             />
-            {showSuggestions && suggestions.length > 0 ? (
-              <View style={styles.suggestions}>
-                {suggestions.slice(0, 8).map((o) => (
-                  <Pressable
-                    key={o}
-                    onPress={() => void selectOrder(o)}
-                    style={({ pressed }) => [styles.suggestion, pressed && styles.suggestionPressed]}
-                  >
-                    <Text style={styles.suggestionText}>{o}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
-          </View>
-        </Field>
-      </Card>
+          </Field>
+
+          {ordersQuery.isLoading ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator size="small" color={colors.text} />
+              <Text style={styles.hint}>Loading orders…</Text>
+            </View>
+          ) : orders.length === 0 ? (
+            <Text style={styles.hint}>No orders have stock left to issue.</Text>
+          ) : visibleOrders.length === 0 ? (
+            <Text style={styles.hint}>No order matches “{orderQuery.trim()}”.</Text>
+          ) : (
+            <View style={styles.list}>
+              {visibleOrders.map((o) => (
+                <OrderPickerRow
+                  key={o.name}
+                  order={o}
+                  selected={o.name === selectedOrder}
+                  disabled={itemsLoading}
+                  onPress={() => void selectOrder(o.name)}
+                />
+              ))}
+            </View>
+          )}
+
+          {hiddenOrderCount > 0 ? (
+            <Text style={styles.hint}>
+              {hiddenOrderCount} more — search to narrow the list.
+            </Text>
+          ) : null}
+        </Card>
       ) : null}
 
       {mode === 'order' && ordersQuery.error ? (
@@ -551,6 +571,75 @@ export default function IssuingScreen() {
   );
 }
 
+/**
+ * What an issuer should read FIRST on a picker row.
+ *
+ * Same order as the packing picker (packing.tsx pickerIdentity), and for the
+ * same reason: the floor recognises what goes on the box — a code, a consignee
+ * — not "SAL-ORD-2026-02056". The caption carries the customer name only when
+ * it is not already the primary line, so nothing is printed twice.
+ */
+function orderIdentity(o: ReadySaleOrder): { primary: string | null; caption: string | null } {
+  const customer = o.customer?.trim() || null;
+  const primary = o.customerCode || o.consignee?.trim() || customer;
+  const caption = customer && customer !== primary ? customer : null;
+  return { primary, caption };
+}
+
+function OrderPickerRow({
+  order,
+  selected,
+  disabled,
+  onPress,
+}: {
+  order: ReadySaleOrder;
+  selected: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const identity = orderIdentity(order);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [
+        styles.pickerRow,
+        pressed && styles.pickerRowPressed,
+        selected && styles.pickerRowSelected,
+        disabled && styles.pickerRowDisabled,
+      ]}
+    >
+      <View style={styles.pickerHead}>
+        <Text style={styles.pickerName} numberOfLines={1}>
+          {order.name}
+        </Text>
+        <Text style={styles.pickerDate}>
+          {order.deliveryDate ? `Due ${order.deliveryDate}` : ''}
+        </Text>
+      </View>
+      {identity.primary ? (
+        <Text style={styles.pickerPrimary} numberOfLines={1}>
+          {identity.primary}
+        </Text>
+      ) : null}
+      {identity.caption ? (
+        <Text style={styles.pickerCaption} numberOfLines={1}>
+          {identity.caption}
+        </Text>
+      ) : null}
+      {/* The reason this order is still in the list, and the one number that
+          says how much work is left on it. */}
+      {order.unissued > 0 ? (
+        <Text style={styles.pickerMeta} numberOfLines={1}>
+          {order.unissued} bucket{order.unissued === 1 ? '' : 's'} to issue
+          {order.pickLists > 1 ? ` · ${order.pickLists} pick lists` : ''}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
 function PackingCard({ item }: { item: XfloraReadySaleOrderItem }) {
   return (
     <View style={[styles.card, item.isIssued && styles.cardIssued]}>
@@ -612,30 +701,24 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: colors.surface,
   },
-  suggestions: {
-    position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+  // Matches the packing picker so the two screens read as one app.
+  pickerRow: {
+    gap: 2,
+    padding: spacing.md,
     borderRadius: radii.md,
-    zIndex: 100,
-    elevation: 4,
-    shadowColor: 'black',
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
-  suggestion: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-  },
-  suggestionPressed: { backgroundColor: colors.pressed },
-  suggestionText: { fontSize: 14, color: colors.primary },
+  pickerRowPressed: { backgroundColor: colors.pressed },
+  pickerRowSelected: { borderColor: colors.primary, borderWidth: 1.5 },
+  pickerRowDisabled: { opacity: 0.45 },
+  pickerHead: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
+  pickerName: { fontSize: 14, fontWeight: '600', color: colors.primary, flexShrink: 1 },
+  pickerDate: { fontSize: 12, color: colors.muted },
+  pickerPrimary: { fontSize: 14, fontWeight: '600', color: colors.primary, marginTop: 2 },
+  pickerCaption: { fontSize: 12, color: colors.muted },
+  pickerMeta: { fontSize: 13, color: colors.textSecondary },
   loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
