@@ -3,16 +3,15 @@ import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 
 import { Button } from '../../components/ui/Button';
 import { colors, radii, spacing } from '../../components/ui/theme';
-import { validateOverride } from './sprayOverride';
+import { quickPicks, validateOverride } from './sprayOverride';
 
 // Unbunched Spray Roses never arrive as a full bucket, so the stem count is
 // asked for automatically instead of relying on the packer to remember the
 // "Partial" mode.
 //
-// Typing in a coldroom is slow, so the three usual counts are one tap each and
-// post immediately. The field is for everything else.
-
-const QUICK_PICKS = [10, 30, 50] as const;
+// Typing in a coldroom is slow, so the usual counts are one tap each and post
+// immediately. The field beside them is for everything else — a bucket holding
+// 38 stems is typed, not approximated to the nearest button.
 
 interface StemCountPromptProps {
     visible: boolean;
@@ -35,6 +34,8 @@ export function StemCountPrompt({
 }: StemCountPromptProps) {
     const [text, setText] = useState('');
     const [error, setError] = useState<string | null>(null);
+
+    const picks = quickPicks(standard);
 
     function submit(raw: string) {
         const verdict = validateOverride(raw, standard);
@@ -61,7 +62,7 @@ export function StemCountPrompt({
                     ) : null}
 
                     <View style={styles.quickRow}>
-                        {QUICK_PICKS.map((n) => (
+                        {picks.map((n) => (
                             <Pressable
                                 key={n}
                                 disabled={busy}
@@ -86,7 +87,7 @@ export function StemCountPrompt({
                                 setError(null);
                             }}
                             keyboardType="number-pad"
-                            placeholder="Other"
+                            placeholder="Other — e.g. 38"
                             placeholderTextColor={colors.muted}
                             editable={!busy}
                             returnKeyType="done"

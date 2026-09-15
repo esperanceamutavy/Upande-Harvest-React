@@ -44,6 +44,31 @@ export function validateOverride(raw: string, standard: number | null): Override
     return { ok: true, qty };
 }
 
+/**
+ * The one-tap counts on the stem prompt.
+ *
+ * Quarters of a 120-stem bucket, which is what every Spray Rose carries as its
+ * `custom_bucket_rate` (verified across all 275 live records, 2026-09-15). 120
+ * itself is included because a full unbunched bucket is a real delivery and sits
+ * exactly ON the ceiling, which validateOverride accepts.
+ *
+ * Anything else — the 38-stem bucket — is typed into the field beside them.
+ */
+export const QUICK_PICKS = [30, 60, 90, 120] as const;
+
+/**
+ * The quick picks that this item can actually accept.
+ *
+ * A button the server is going to refuse should never be on screen. Most
+ * varieties take all four, but Pavlova-40CM carries an unbunched rate of 100
+ * and so drops the 120. With no standard known nothing can be ruled out, and
+ * validateOverride has no ceiling to enforce either, so all four stay.
+ */
+export function quickPicks(standard: number | null): number[] {
+    if (standard == null || standard <= 0) return [...QUICK_PICKS];
+    return QUICK_PICKS.filter((n) => n <= standard);
+}
+
 /** The standard rate for an item: unbunched rate first, then the bucket rate. */
 export function standardRate(
     unbunchedRate: number | null | undefined,
