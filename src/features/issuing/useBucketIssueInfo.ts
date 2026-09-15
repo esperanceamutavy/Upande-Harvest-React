@@ -31,7 +31,17 @@ export interface BucketAllocation {
   salesOrder: string | null;
   saleOrderItem: string | null;
   variety: string | null;
+  stemLength: string | null;
   shelf: string | null;
+
+  // ── Who it is for. A picker recognises the customer and the CODE that goes
+  // on the box; SAL-ORD-2026-02031 means nothing on the floor.
+  customer: string | null;
+  /** `Customer Code.code`, RESOLVED — the line's code wins, header is the
+   *  fallback. Rendered exactly as stored: live codes carry double spaces. */
+  customerCode: string | null;
+  consignee: string | null;
+
   /** Server-supplied text. Present on every branch. */
   message: string;
 }
@@ -44,7 +54,11 @@ function emptyAllocation(status: BucketAllocationStatus, bucketId: string, messa
     salesOrder: null,
     saleOrderItem: null,
     variety: null,
+    stemLength: null,
     shelf: null,
+    customer: null,
+    customerCode: null,
+    consignee: null,
     message,
   } satisfies BucketAllocation;
 }
@@ -64,7 +78,11 @@ async function fetchBucketIssueInfo(bucketId: string): Promise<BucketAllocation>
       salesOrder: d.sales_order != null ? String(d.sales_order) : null,
       saleOrderItem: d.sale_order_item != null ? String(d.sale_order_item) : null,
       variety: d.variety != null ? String(d.variety) : null,
+      stemLength: d.stem_length != null ? String(d.stem_length) : null,
       shelf: d.shelf != null ? String(d.shelf) : null,
+      customer: d.customer != null ? String(d.customer) : null,
+      customerCode: d.customer_code != null ? String(d.customer_code) : null,
+      consignee: d.consignee != null ? String(d.consignee) : null,
       message: body.message != null ? String(body.message) : 'ok',
     };
   } catch (e) {

@@ -283,13 +283,29 @@ export default function IssuingScreen() {
       // order selection needed.
       isProcessingRef.current = false;
       setLoading(false);
-      const where = info.salesOrder ?? info.oplName ?? '—';
-      await issueAgainst(
-        bucketId,
-        info.saleOrderItem,
-        info.oplName ?? '',
-        [info.variety, info.shelf ? `shelf ${info.shelf}` : null, where].filter(Boolean).join(' · '),
-      );
+      // WHO IT IS FOR, FIRST. A picker recognises the customer and the code
+      // that goes on the box; SAL-ORD-2026-02031 means nothing on the floor.
+      // Same order of precedence the packing screen shows: code, customer,
+      // then the order itself as the fallback.
+      const who =
+        info.customerCode ??
+        info.consignee ??
+        info.customer ??
+        info.salesOrder ??
+        info.oplName ??
+        '—';
+      const context = [
+        who,
+        info.customerCode && info.customer ? info.customer : null,
+        info.variety,
+        info.stemLength,
+        info.shelf ? `shelf ${info.shelf}` : null,
+        info.salesOrder,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+
+      await issueAgainst(bucketId, info.saleOrderItem, info.oplName ?? '', context);
     } catch (e) {
       const message = extractFrappeError(e);
       setFeedback({ tone: 'danger', text: message });
