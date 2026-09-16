@@ -39,6 +39,17 @@ function entriesLabel(entries: number | null): string | undefined {
   return `${n.toLocaleString()} ${n === 1 ? 'entry' : 'entries'}`;
 }
 
+/** "3 closed · 2 open" — the two numbers a packer actually watches.
+ *
+ *  A box counts as OPEN from the moment something is scanned into it and CLOSED
+ *  once its stems reach the pack rate, so open is work still on the bench. Both
+ *  are shown even at zero: "0 closed · 4 open" says something real about the
+ *  shift, and blanking it would read as missing data. */
+function boxesLabel(closed: number | null, open: number | null): string | undefined {
+  if (closed == null && open == null) return undefined;
+  return `${(closed ?? 0).toLocaleString()} closed · ${(open ?? 0).toLocaleString()} open`;
+}
+
 export default function Dashboard() {
   const router = useRouter();
   // Today's gap only — the full 32-greenhouse breakdown lives on its own screen.
@@ -117,6 +128,20 @@ export default function Dashboard() {
                 value={fmt(data?.gradedStems ?? null)}
                 unit="stems"
                 sublabel={entriesLabel(data?.gradedEntries ?? null)}
+              />
+            </View>
+
+            {/* PACKED — the packers' own scoreboard. Boxes matter more to them
+                than stems, so both are on the tile: the number is the day's
+                stems, the line beneath is what is finished versus still on the
+                bench. */}
+            <View style={styles.row}>
+              <StatTile
+                tone="blue"
+                label="PACKED"
+                value={fmt(data?.packedStems ?? null)}
+                unit="stems"
+                sublabel={boxesLabel(data?.boxesClosed ?? null, data?.boxesOpen ?? null)}
               />
             </View>
 

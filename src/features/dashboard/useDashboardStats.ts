@@ -10,6 +10,7 @@ import { apiClient } from '../../lib/api';
 //   - get_shelving_dashboard_data   (Shelved)          [confirmed live]
 //   - get_bucket_transfer_stats     (Bucket Transfer)  [confirmed live]
 //   - get_grading_stats             (Graded)           [live] -> also message.total_entries
+//   - get_packing_stats             (Packed)           [live] -> also boxes_closed / boxes_open
 // Grading is a dashboard stat only — it is NOT a drawer/tab workflow.
 // See DESIGN_PORT_PLAN.md §4.
 
@@ -19,6 +20,12 @@ export interface DashboardStats {
   bucketTransferStems: number | null;
   gradedStems: number | null;
   gradedEntries: number | null;
+  /** Stems scanned into boxes today (Farm Pack List total_stems). */
+  packedStems: number | null;
+  /** A box exists once something is scanned into it; closed once it reaches
+   *  its pack rate. Open is the difference. */
+  boxesClosed: number | null;
+  boxesOpen: number | null;
 }
 
 function todayISO(): string {
@@ -42,14 +49,18 @@ async function fetchDashboardStats(): Promise<DashboardStats> {
   const today = todayISO();
   const range = { from_date: today, to_date: today };
 
-  const [received, shelved, transfer, graded] = await Promise.allSettled([
+  const [received, shelved, transfer, graded, packed] = await Promise.allSettled([
     postMessage('get_receiving_dashboard_data', range),
     postMessage('get_shelving_dashboard_data', range),
     postMessage('get_bucket_transfer_stats', range),
     postMessage('get_grading_stats', range),
+    postMessage('get_packing_stats', range),
   ]);
 
-  // If every call failed, surface an error so the screen shows retry.
+  // If every call failed, surface an error so the screen shows retry. Packing is
+  // NOT in this test: it is the newest endpoint, and a site that has not had it
+  // created yet should still get a working board with one blank tile rather
+  // than a retry screen.
   if (
     received.status === 'rejected' &&
     shelved.status === 'rejected' &&
@@ -70,6 +81,9 @@ async function fetchDashboardStats(): Promise<DashboardStats> {
     bucketTransferStems: field(transfer, 'total_stems'),
     gradedStems: field(graded, 'total_stems'),
     gradedEntries: field(graded, 'total_entries'),
+    packedStems: field(packed, 'total_stems'),
+    boxesClosed: field(packed, 'boxes_closed'),
+    boxesOpen: field(packed, 'boxes_open'),
   };
 }
 
