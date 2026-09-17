@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Eye, EyeOff } from 'lucide-react-native';
 
 import { CLIENT_DISPLAY_NAME } from '../../lib/config';
-import { STORAGE_KEYS, getStorageItem } from '../../lib/storage';
+import { APP_KEYS, TENANT_KEYS, getAppItem, getItemFor } from '../../lib/storage';
 import { useLogin } from '../../features/auth/useLogin';
 import { Button } from '../../components/ui/Button';
 import { Field } from '../../components/ui/Field';
@@ -40,10 +40,14 @@ export default function LoginScreen() {
     defaultValues: { email: '', password: '' },
   });
 
-  // Pre-fill email from AsyncStorage backup
+  // Pre-fill the email belonging to the site last logged into. `last_site` is the
+  // only thing readable here — no tenant is active yet, which is precisely why that
+  // pointer sits outside the tenant namespace.
   useEffect(() => {
     async function prefill() {
-      const savedEmail = await getStorageItem(STORAGE_KEYS.EMAIL_BACKUP);
+      const lastSite = await getAppItem(APP_KEYS.LAST_SITE);
+      if (!lastSite) return;
+      const savedEmail = await getItemFor(lastSite, TENANT_KEYS.EMAIL);
       if (savedEmail) {
         setValue('email', savedEmail);
       }

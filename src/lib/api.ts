@@ -1,7 +1,7 @@
 import axios, { AxiosError } from 'axios';
 
 import type { ApiError, FrappeErrorBody } from '../types/frappe';
-import { SECURE_KEYS, deleteSecureItem } from './storage';
+import { TENANT_KEYS, removeItemFor } from './storage';
 import { useAuthStore } from '../stores/auth';
 
 function parseFrappeError(error: AxiosError<FrappeErrorBody>): ApiError {
@@ -58,8 +58,11 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError<FrappeErrorBody>) => {
     if (error.response?.status === 401) {
+      // Read the tenant BEFORE clearing — the implicit accessors throw when no
+      // tenant is active, and that throw would land inside this error handler.
+      const { tenantId } = useAuthStore.getState();
       useAuthStore.getState().clearCredentials();
-      void deleteSecureItem(SECURE_KEYS.SID);
+      if (tenantId) void removeItemFor(tenantId, TENANT_KEYS.SID);
     }
     return Promise.reject(parseFrappeError(error));
   },

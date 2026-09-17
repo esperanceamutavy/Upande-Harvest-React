@@ -2,10 +2,20 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { INSTANCE_HOST } from '../../lib/config';
-import { SECURE_KEYS, STORAGE_KEYS, setSecureItem, setStorageItem } from '../../lib/storage';
+import { parseSiteInput } from '../../lib/siteUrl';
+import {
+  APP_KEYS,
+  TENANT_KEYS,
+  getAppItem,
+  getItemFor,
+  setActiveTenant,
+  setAppItem,
+  setItemFor,
+} from '../../lib/storage';
 import { resetTenantState } from '../../lib/tenantReset';
 import { useAuthStore } from '../../stores/auth';
 import { loginAndGetSession } from './authService';
+import { tearDownTenant } from './tearDownTenant';
 
 export interface LoginInput {
   email: string;
@@ -28,29 +38,40 @@ export function useLogin() {
         password,
       );
 
-      // Persist sensitive credentials to SecureStore
-      await Promise.all([
-        setSecureItem(SECURE_KEYS.SID, sid),
-        setSecureItem(SECURE_KEYS.INSTANCE_URL, instanceUrl),
-      ]);
+      // Upgrade any http:// the old normalizeUrl fallback produced before parsing.
+      // Once that fallback is deleted this becomes a no-op.
+      const parsed = parseSiteInput(instanceUrl.replace(/^http:\/\//i, 'https://'));
+      if (!parsed.ok) throw new Error('Unsupported site address.');
+      const { tenantId, origin } = parsed.site;
 
-      // Persist non-sensitive fields to AsyncStorage (pre-fill + hydration on next launch)
-      await Promise.all([
-        setStorageItem(STORAGE_KEYS.INSTANCE_URL_BACKUP, instanceUrl),
-        setStorageItem(STORAGE_KEYS.EMAIL_BACKUP, email.trim()),
-        setStorageItem('fullname', fullName),
-        setStorageItem('email', email.trim()),
-      ]);
-
-      console.log('[auth] Stored credentials');
+      // ── one live session at a time ──────────────────────────────────────────
+      // Signing in to a different site ends the previous one properly: the server
+      // is told, and every key that tenant owned is deleted. Without the server
+      // call the abandoned sid would stay valid for its full 30-day Max-Age.
+      const outgoing = await getAppItem(APP_KEYS.ACTIVE_TENANT);
+      if (outgoing && outgoing !== tenantId) {
+        const outgoingSid = await getItemFor(outgoing, TENANT_KEYS.SID);
+        await tearDownTenant(outgoing, outgoingSid);
+      }
 
       // Before setCredentials, never after. The gate mounts (app) the moment
       // isAuthenticated flips and the dashboard query fires immediately; flushing
-      // afterwards would let the previous user's figures paint for a frame. See
-      // the ORDERING note in tenantReset.ts.
+      // afterwards would let the previous session's figures paint for a frame.
+      // See the ORDERING note in tenantReset.ts.
       resetTenantState(queryClient);
 
-      setCredentials({ sid, instanceUrl, fullName, email: email.trim() });
+      setActiveTenant(tenantId);
+      await Promise.all([
+        setItemFor(tenantId, TENANT_KEYS.SID, sid),
+        setItemFor(tenantId, TENANT_KEYS.EMAIL, email.trim()),
+        setItemFor(tenantId, TENANT_KEYS.FULLNAME, fullName),
+        setAppItem(APP_KEYS.LAST_SITE, tenantId),
+      ]);
+      // Written last: it is the pointer boot follows, so it should only exist once
+      // the keys it points at are on disk.
+      await setAppItem(APP_KEYS.ACTIVE_TENANT, tenantId);
+
+      setCredentials({ sid, instanceUrl: origin, tenantId, fullName, email: email.trim() });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
       setError(message);

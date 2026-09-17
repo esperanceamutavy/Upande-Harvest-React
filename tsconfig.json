@@ -2,6 +2,10 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // Required so pure modules under src/lib can import each other with an explicit
+    // .ts extension. Node's ESM resolver (which runs `npm test`) demands it, and
+    // every existing tested module avoided the question only by having no imports.
+    "allowImportingTsExtensions": true,
     "paths": {
       "@/*": [
         "./src/*"

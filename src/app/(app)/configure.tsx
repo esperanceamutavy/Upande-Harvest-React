@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 
 import { useFarms } from '../../features/station/useFarms';
 import { useFarmStore } from '../../stores/farm';
-import { setStorageItem, STORAGE_KEYS } from '../../lib/storage';
+import { setItem, TENANT_KEYS } from '../../lib/storage';
 import { haptics } from '../../lib/haptics';
 import { Button } from '../../components/ui/Button';
 import { Card, Notice } from '../../components/ui/Card';
@@ -54,7 +54,7 @@ export default function ConfigureFarm() {
     setIsSaving(true);
     const farmName = farms.find((f) => f.name === selectedFarm)?.farm_name ?? selectedFarm;
     const userFarm = { farm: selectedFarm, farmName };
-    await setStorageItem(STORAGE_KEYS.USER_FARM, JSON.stringify(userFarm));
+    await setItem(TENANT_KEYS.USERFARM, JSON.stringify(userFarm));
     setFarm(userFarm);
     setSavedMsg(true);
     setValidationError('');
