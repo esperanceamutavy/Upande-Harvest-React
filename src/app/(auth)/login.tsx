@@ -60,7 +60,6 @@ export default function LoginScreen() {
       }
     }
     void prefill();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setValue]);
 
   const onSubmit = handleSubmit(({ site, email, password }) => {
