@@ -9,7 +9,7 @@ import '../lib/sentry'; // side-effect: initialises Sentry once at module load
 import '../lib/fonts'; // side-effect: patches Text/TextInput to default to DM Sans
 import { APP_FONTS } from '../lib/fonts';
 import { initAudio } from '../lib/audio';
-import { INSTANCE_HOST } from '../lib/config';
+import { LEGACY_PINNED_HOST } from '../lib/config';
 import { parseSiteInput } from '../lib/siteUrl';
 import {
   APP_KEYS,
@@ -55,7 +55,7 @@ function RootLayoutNav() {
     async function hydrate() {
       void initAudio(); // fire-and-forget; players needed before first workflow screen
 
-      const migration = await runStorageMigration(INSTANCE_HOST);
+      const migration = await runStorageMigration(LEGACY_PINNED_HOST);
 
       let sid: string | null = null;
       let instanceUrl: string | null = null;

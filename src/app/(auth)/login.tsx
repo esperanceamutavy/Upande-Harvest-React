@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Eye, EyeOff } from 'lucide-react-native';
 
-import { CLIENT_DISPLAY_NAME } from '../../lib/config';
+import { parseSiteInput, siteErrorMessage } from '../../lib/siteUrl';
 import { APP_KEYS, TENANT_KEYS, getAppItem, getItemFor } from '../../lib/storage';
 import { useLogin } from '../../features/auth/useLogin';
 import { Button } from '../../components/ui/Button';
@@ -23,6 +23,7 @@ import { Pill } from '../../components/ui/Pill';
 import { colors, radii, spacing } from '../../components/ui/theme';
 
 interface FormValues {
+  site: string;
   email: string;
   password: string;
 }
@@ -37,7 +38,7 @@ export default function LoginScreen() {
     setValue,
     formState: { errors },
   } = useForm<FormValues>({
-    defaultValues: { email: '', password: '' },
+    defaultValues: { site: '', email: '', password: '' },
   });
 
   // Pre-fill the email belonging to the site last logged into. `last_site` is the
@@ -47,6 +48,12 @@ export default function LoginScreen() {
     async function prefill() {
       const lastSite = await getAppItem(APP_KEYS.LAST_SITE);
       if (!lastSite) return;
+      // Re-validate rather than trusting it: an install may hold a host that has
+      // since dropped off the allowlist. Better a blank field than one pre-filled
+      // with something that will be refused on submit.
+      if (parseSiteInput(lastSite).ok) {
+        setValue('site', lastSite);
+      }
       const savedEmail = await getItemFor(lastSite, TENANT_KEYS.EMAIL);
       if (savedEmail) {
         setValue('email', savedEmail);
@@ -56,8 +63,13 @@ export default function LoginScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setValue]);
 
-  const onSubmit = handleSubmit(({ email, password }) => {
-    void submit({ email, password });
+  const onSubmit = handleSubmit(({ site, email, password }) => {
+    const parsed = parseSiteInput(site);
+    if (!parsed.ok) return; // react-hook-form already blocked this; defensive only
+    // Show the user the canonical host that is about to be contacted, rather than
+    // whatever casing or scheme they typed.
+    setValue('site', parsed.site.host);
+    void submit({ site: parsed.site, email, password });
   });
 
   return (
@@ -72,7 +84,37 @@ export default function LoginScreen() {
         >
           <View style={styles.card}>
             <Text style={styles.appName}>Upande Harvest</Text>
-            <Text style={styles.clientBadge}>{CLIENT_DISPLAY_NAME}</Text>
+
+            <Field label="Site" error={errors.site?.message}>
+              <Controller
+                control={control}
+                name="site"
+                rules={{
+                  required: 'Site required',
+                  validate: (v: string) => {
+                    const r = parseSiteInput(v);
+                    return r.ok || siteErrorMessage(r.reason);
+                  },
+                }}
+                render={({ field: { value, onChange, onBlur } }) => (
+                  <TextInput
+                    style={[styles.input, errors.site && styles.inputError]}
+                    placeholder="yoursite.upande.com"
+                    placeholderTextColor={colors.muted}
+                    value={value}
+                    // Bound to the raw typed text. Normalising in onChangeText
+                    // fights the cursor; it happens on submit instead.
+                    onChangeText={onChange}
+                    onBlur={onBlur}
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    inputMode="url"
+                    autoComplete="off"
+                    autoCorrect={false}
+                  />
+                )}
+              />
+            </Field>
 
             <Field label="Email" error={errors.email?.message}>
               <Controller
@@ -178,7 +220,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   inputError: { borderColor: colors.error },
-  clientBadge: { fontSize: 12, fontWeight: '500', color: colors.textMuted, textAlign: 'center' },
   passwordRow: { flexDirection: 'row', alignItems: 'center' },
   passwordInput: { flex: 1 },
   eyeBtn: { padding: 4, marginLeft: spacing.sm },

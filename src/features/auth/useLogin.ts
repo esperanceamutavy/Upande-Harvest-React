@@ -1,8 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { INSTANCE_HOST } from '../../lib/config';
-import { parseSiteInput } from '../../lib/siteUrl';
+import type { ValidSite } from '../../lib/siteUrl';
 import {
   APP_KEYS,
   TENANT_KEYS,
@@ -18,6 +17,8 @@ import { loginAndGetSession } from './authService';
 import { tearDownTenant } from './tearDownTenant';
 
 export interface LoginInput {
+  /** Already validated by the screen — the type is the proof. */
+  site: ValidSite;
   email: string;
   password: string;
 }
@@ -28,21 +29,15 @@ export function useLogin() {
   const setCredentials = useAuthStore((s) => s.setCredentials);
   const queryClient = useQueryClient();
 
-  async function submit({ email, password }: LoginInput) {
+  async function submit({ site, email, password }: LoginInput) {
     setIsLoading(true);
     setError(null);
     try {
-      const { instanceUrl, sid, fullName } = await loginAndGetSession(
-        INSTANCE_HOST,
+      const { sid, fullName, tenantId } = await loginAndGetSession(
+        site,
         email.trim(),
         password,
       );
-
-      // Upgrade any http:// the old normalizeUrl fallback produced before parsing.
-      // Once that fallback is deleted this becomes a no-op.
-      const parsed = parseSiteInput(instanceUrl.replace(/^http:\/\//i, 'https://'));
-      if (!parsed.ok) throw new Error('Unsupported site address.');
-      const { tenantId, origin } = parsed.site;
 
       // ── one live session at a time ──────────────────────────────────────────
       // Signing in to a different site ends the previous one properly: the server
@@ -71,7 +66,7 @@ export function useLogin() {
       // the keys it points at are on disk.
       await setAppItem(APP_KEYS.ACTIVE_TENANT, tenantId);
 
-      setCredentials({ sid, instanceUrl: origin, tenantId, fullName, email: email.trim() });
+      setCredentials({ sid, instanceUrl: site.origin, tenantId, fullName, email: email.trim() });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
       setError(message);
