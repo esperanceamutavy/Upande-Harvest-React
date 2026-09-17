@@ -30,6 +30,25 @@ decisions, read:
 - Auth = **session cookie**. The app stores the `sid` from `POST /api/method/login` and replays it as
   `Cookie: sid=<sid>`. There is NO `generate_keys` step and NO `Authorization: token` header.
 
+## Constraints
+
+These are not preferences. Breaking one costs a rebuild, a lost session, or a production incident.
+
+1. **Prefer OTA-shippable changes.** Flag any new native dependency explicitly — it forces an
+   `eas build` and a store round-trip, not an `eas update`.
+2. **User-entered site URLs validate against an allowlist of `*.upande.com`, and are https-only.**
+   Drop `normalizeUrl()`'s HEAD probe and `http://` fallback for them: the login POST carries
+   `usr`/`pwd` in a form body, so a silent downgrade to `http://` puts a password on the wire in
+   clear text. The pinned-host path may keep its current behaviour until the pin is removed.
+3. **All persisted keys are namespaced by tenant id.** Never write an unprefixed key. The `sid`
+   request interceptor replays the `sid` belonging to the *active* tenant.
+4. **Legacy installs hold flat keys** — SecureStore: `SID`, `INSTANCE_URL`; AsyncStorage:
+   `instanceurl_backup`, `email_backup`, `fullname`, `email`, `USER_FARM`. The migration **copies**
+   to the prefixed key, **verifies** the copy, and only then **deletes** the flat one. Never
+   delete-then-write. It must be idempotent and crash-safe: no existing session is lost, and nobody
+   is logged out by upgrading.
+5. **There is no offline queue.** Do not design for one, and do not go looking for one.
+
 ## When to ask the user vs. just proceed
 - **Proceed silently:** mechanical tasks (install a package listed in STACK.md, port a screen following the established pattern, fix a TypeScript error).
 - **Ask the user:** new dependency, deviation from STACK.md, ambiguous Flutter behavior, anything that affects more than one phase.
