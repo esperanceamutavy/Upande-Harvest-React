@@ -54,6 +54,14 @@ These are not preferences. Breaking one costs a rebuild, a lost session, or a pr
    Never delete-then-write. Idempotent and crash-safe: no existing session is lost, and nobody is
    logged out by upgrading. If you change it, the tests in `migrateTenantKeys.test.ts` are the spec.
 5. **There is no offline queue.** Do not design for one, and do not go looking for one.
+6. **Explicit `.ts` import extensions are load-bearing. Do not "tidy" them away.**
+   `npm test` is `node --test` on plain Node, whose ESM resolver requires the extension —
+   strip it and the suite dies with `ERR_MODULE_NOT_FOUND`, not a type error, so it fails in a
+   way that looks unrelated to the edit that caused it. `allowImportingTsExtensions` in
+   `tsconfig.json` is what permits the spelling; Metro resolves it at bundle time (confirmed
+   with `expo export`). Every `*.test.ts` already relies on this, and so do the source modules
+   `src/lib/storage.ts` and `src/lib/migrateTenantKeys.ts` — the first source files in the repo
+   to import another source module, which is why the question only surfaced recently.
 
 ## When to ask the user vs. just proceed
 - **Proceed silently:** mechanical tasks (install a package listed in STACK.md, port a screen following the established pattern, fix a TypeScript error).
