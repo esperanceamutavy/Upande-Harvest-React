@@ -23,6 +23,15 @@ import type { BunchComponent, BunchDetails } from '../../types/packing';
 
 const variantParentCache = new Map<string, string>();
 
+/**
+ * Drop every cached variant→template relation. Keyed by `item_code`, a Frappe doc
+ * name, so the keys collide across sites while the values do not — see the same
+ * note on `clearBucketItemCache`. Called from `resetTenantState`.
+ */
+export function clearVariantParentCache(): void {
+  variantParentCache.clear();
+}
+
 async function getValue(
   doctype: string,
   name: string,

@@ -1,10 +1,13 @@
+import { useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 
 import { SECURE_KEYS, deleteSecureItem } from '../../lib/storage';
+import { resetTenantState } from '../../lib/tenantReset';
 import { useAuthStore } from '../../stores/auth';
 
 export function useLogout() {
   const clearCredentials = useAuthStore((s) => s.clearCredentials);
+  const queryClient = useQueryClient();
 
   async function logout() {
     // Best-effort server-side session invalidation. Send the sid cookie to
@@ -27,7 +30,11 @@ export function useLogout() {
       deleteSecureItem(SECURE_KEYS.SID),
       deleteSecureItem(SECURE_KEYS.INSTANCE_URL),
     ]);
+    // Credentials first, so the gate unmounts (app) rather than leaving mounted
+    // observers to refetch against a cache we are about to wipe. Both calls land
+    // in the same tick, so no render sees a half-cleared world.
     clearCredentials();
+    resetTenantState(queryClient);
   }
 
   return { logout };

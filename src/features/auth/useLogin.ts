@@ -1,7 +1,9 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { INSTANCE_HOST } from '../../lib/config';
 import { SECURE_KEYS, STORAGE_KEYS, setSecureItem, setStorageItem } from '../../lib/storage';
+import { resetTenantState } from '../../lib/tenantReset';
 import { useAuthStore } from '../../stores/auth';
 import { loginAndGetSession } from './authService';
 
@@ -14,6 +16,7 @@ export function useLogin() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const setCredentials = useAuthStore((s) => s.setCredentials);
+  const queryClient = useQueryClient();
 
   async function submit({ email, password }: LoginInput) {
     setIsLoading(true);
@@ -40,6 +43,13 @@ export function useLogin() {
       ]);
 
       console.log('[auth] Stored credentials');
+
+      // Before setCredentials, never after. The gate mounts (app) the moment
+      // isAuthenticated flips and the dashboard query fires immediately; flushing
+      // afterwards would let the previous user's figures paint for a frame. See
+      // the ORDERING note in tenantReset.ts.
+      resetTenantState(queryClient);
+
       setCredentials({ sid, instanceUrl, fullName, email: email.trim() });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An unexpected error occurred.';

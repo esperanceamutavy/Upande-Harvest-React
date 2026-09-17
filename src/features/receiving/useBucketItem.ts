@@ -33,6 +33,17 @@ export interface BucketItem {
 
 const itemCache = new Map<string, { itemGroup: string | null; standard: number | null }>();
 
+/**
+ * Drop every cached item. Keyed by `item_code` — a Frappe doc name — which is
+ * unique per site and NOT across sites: every instance has its own `Rose Red 60CM`.
+ * So a cached `standard` from one site would be served for another site's scan,
+ * silently and with no network call to notice, and `standard` is a stem count that
+ * ends up in a Stock Entry. Called from `resetTenantState` on every login and logout.
+ */
+export function clearBucketItemCache(): void {
+    itemCache.clear();
+}
+
 function toNum(v: unknown): number | null {
     if (typeof v === 'number' && Number.isFinite(v)) return v;
     if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
