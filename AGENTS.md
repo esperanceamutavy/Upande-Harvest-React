@@ -25,7 +25,10 @@ decisions, read:
 7. Do not commit `node_modules`, `.expo`, `ios/`, `android/` build outputs, or environment files with secrets.
 
 ## Scope reminder
-- Single instance: **Xflora only**, pinned to `xflora.upande.com` in `src/lib/config.ts`. There is no client picker.
+- **Multi-tenant.** The site is a validated field on the login form, any single-label
+  `*.upande.com` host. One live session at a time; switching sites tears the previous one down on
+  the server as well as locally. `LEGACY_PINNED_HOST` in `src/lib/config.ts` is only the storage
+  migration's answer to "which tenant did this install used to be?".
 - Bluetooth thermal printing = v1.1 (requires dev build). Not in v1.
 - Auth = **session cookie**. The app stores the `sid` from `POST /api/method/login` and replays it as
   `Cookie: sid=<sid>`. There is NO `generate_keys` step and NO `Authorization: token` header.
@@ -37,16 +40,19 @@ These are not preferences. Breaking one costs a rebuild, a lost session, or a pr
 1. **Prefer OTA-shippable changes.** Flag any new native dependency explicitly — it forces an
    `eas build` and a store round-trip, not an `eas update`.
 2. **User-entered site URLs validate against an allowlist of `*.upande.com`, and are https-only.**
-   Drop `normalizeUrl()`'s HEAD probe and `http://` fallback for them: the login POST carries
-   `usr`/`pwd` in a form body, so a silent downgrade to `http://` puts a password on the wire in
-   clear text. The pinned-host path may keep its current behaviour until the pin is removed.
-3. **All persisted keys are namespaced by tenant id.** Never write an unprefixed key. The `sid`
-   request interceptor replays the `sid` belonging to the *active* tenant.
-4. **Legacy installs hold flat keys** — SecureStore: `SID`, `INSTANCE_URL`; AsyncStorage:
-   `instanceurl_backup`, `email_backup`, `fullname`, `email`, `USER_FARM`. The migration **copies**
-   to the prefixed key, **verifies** the copy, and only then **deletes** the flat one. Never
-   delete-then-write. It must be idempotent and crash-safe: no existing session is lost, and nobody
-   is logged out by upgrading.
+   Done: `parseSiteInput()` in `src/lib/siteUrl.ts` is the only way to obtain a host, and
+   `normalizeUrl()`'s HEAD probe and `http://` fallback are deleted. The login POST carries
+   `usr`/`pwd` in a form body, so a silent downgrade to `http://` would put a password on the wire
+   in clear text. Never reintroduce a scheme fallback.
+3. **All persisted keys are namespaced by tenant id.** Never write an unprefixed key. Enforced by
+   eslint: only `src/lib/storage.ts` may import AsyncStorage or `expo-secure-store`. The two
+   exceptions are `app__active_tenant` and `app__last_site`, which exist because SecureStore has no
+   key-enumeration API and hold no user data.
+4. **Legacy installs hold flat keys** — SecureStore: `sid`, `instanceurl`; AsyncStorage:
+   `instanceurl_backup`, `email_backup`, `fullname`, `email`, `userFarm`. `src/lib/migrateTenantKeys.ts`
+   **copies** to the prefixed key, **verifies** the copy, and only then **deletes** the flat one.
+   Never delete-then-write. Idempotent and crash-safe: no existing session is lost, and nobody is
+   logged out by upgrading. If you change it, the tests in `migrateTenantKeys.test.ts` are the spec.
 5. **There is no offline queue.** Do not design for one, and do not go looking for one.
 
 ## When to ask the user vs. just proceed

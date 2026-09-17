@@ -44,9 +44,12 @@
 - Font: Inter (via `@tamagui/font-inter` — ships the same font files and integrates with `createInterFont()`; `@expo-google-fonts/inter` is redundant alongside Tamagui)
 
 ## Forms & validation
-- **`react-hook-form`** for form state
-- **`zod`** for schema validation
-- Resolver: `@hookform/resolvers/zod`
+- **`react-hook-form`** for form state — in practice used **only** by `src/app/(auth)/login.tsx`,
+  with inline `rules`, no resolver. Every other form is `useState` plus manual checks.
+- **`zod` is installed and entirely unused** (zero imports in `src/`), as is `@hookform/resolvers`.
+  Do not treat it as the house standard. `src/lib/siteUrl.ts` deliberately hand-rolls its validation:
+  zod v4's `z.url()` delegates to `new URL()`, which is an incomplete polyfill on React Native, and
+  the module must stay importable by `node --test` with no dependency graph.
 
 ## Storage
 - **`@react-native-async-storage/async-storage`** for non-sensitive (instanceurl, userStation, email_backup)
@@ -75,15 +78,19 @@
 
 Same mechanism as the Flutter app. **There is no API-key step.**
 
-- The host is not typed by the user — it is pinned to `INSTANCE_HOST` in `src/lib/config.ts`
-  (`xflora.upande.com`). The login form takes email + password only.
-- `normalizeUrl()` (`src/features/auth/authService.ts`) tries `https://` with a 5s HEAD check and
-  falls back to `http://`.
+- **The host is typed by the user** on the login form, alongside email and password, and validated
+  by `parseSiteInput()` (`src/lib/siteUrl.ts`) against an anchored `*.upande.com` allowlist. Single
+  subdomain label only. `src/lib/config.ts` retains `LEGACY_PINNED_HOST` for one purpose — telling
+  the storage migration which tenant a pre-migration install belongs to.
+- **https only.** `normalizeUrl()`'s HEAD probe and `http://` fallback are deleted. The login POST
+  carries `usr`/`pwd` in a form body, so a silent downgrade would put a password in clear text; a
+  TLS failure now fails loudly instead.
 - App calls `POST /api/method/login` with a form body (`usr`, `pwd`). The `sid` is read out of the
   response's `Set-Cookie` header — React Native's XHR exposes it; a browser would not.
 - A response whose `sid` is missing or literally `Guest` is treated as a failed login.
-- `sid` + `instanceUrl` are persisted to `expo-secure-store` (`SECURE_KEYS.SID`,
-  `SECURE_KEYS.INSTANCE_URL`) and hydrated into `useAuthStore` on launch by `src/app/_layout.tsx`.
+- The `sid` is persisted under a **tenant-namespaced** key (`<host>__sid`, SecureStore) and
+  hydrated into `useAuthStore` on launch by `src/app/_layout.tsx`. `instanceUrl` is **derived**
+  (`https://${tenantId}`), never stored — one source of truth for which host we talk to.
 - Every subsequent request carries `Cookie: sid=<sid>`, injected by the `apiClient` request
   interceptor in `src/lib/api.ts`.
 - `401` clears the store and deletes the stored `sid`, dropping the user at login. `403` is a normal
@@ -99,7 +106,26 @@ set-cookie: sid=…; Expires=…; Max-Age=2592000; Secure; HttpOnly; Path=/; Sam
 ```
 
 Two consequences: a `sid` is never valid against a sibling `*.upande.com` site, and `Max-Age` is
-30 days, so a stored session outlives a shift but not a month of leave.
+30 days, so a stored session outlives a shift but not a month of leave. The second is why switching
+sites fires a server-side `POST /api/method/logout` for the outgoing tenant rather than just
+dropping the local keys — see `src/features/auth/tearDownTenant.ts`.
+
+## Storage — tenant-namespaced
+
+Every persisted key is composed `` `${host}__${key}` `` (`xflora.upande.com__sid`). `src/lib/storage.ts`
+is the only module permitted to import AsyncStorage or `expo-secure-store`; an eslint
+`no-restricted-imports` rule makes reaching past it a **build error**. Its exported functions take a
+`TenantKey` from a closed union rather than a key string, so an unprefixed write is not expressible.
+
+Two keys sit outside any tenant namespace, under a reserved `app__` prefix: `active_tenant` and
+`last_site`. This is a deliberate exception to the namespacing rule — `expo-secure-store` has no
+key-enumeration API, so boot cannot discover which tenant's `sid` to read without a
+tenant-independent pointer. Neither holds user data.
+
+Legacy installs are migrated by `src/lib/migrateTenantKeys.ts`: copy, verify by reading back, then
+delete, never delete-then-write. It runs on every boot, is idempotent, carries no "done" marker, and
+is awaited before `setHydrated(true)` so no frame of the login screen can appear mid-upgrade. Its
+crash-safety is proved by test, not asserted — `migrateTenantKeys.test.ts` kills it at each step.
 
 ## Error tracking
 - **Sentry React Native** — new Sentry project (separate from Flutter), DSN in `.env`

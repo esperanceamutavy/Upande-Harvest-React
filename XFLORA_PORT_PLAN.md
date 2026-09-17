@@ -16,7 +16,12 @@ These surfaced during recon and change the plan. Several need a product/backend 
 
 2. **"Rejects" in the live drawer ≠ a rejects widget; it maps to the Discard flow.** The authoritative v4.0.0 drawer lists **Rejects** but *not* **Discards**. The Flutter code has the reverse: a **Discards** tile that (for Xflora) routes to `XfloraDiscardStockEntry`, and a **Rejects** tile that is a no-op for Xflora. The only "remove a bucket" workflow Xflora actually implements is the coldroom-bucket discard (scan `coldroom_bucket` → `createDiscardEntry`, with an age/`bucket_too_young` guard). **Working interpretation: the drawer's "Rejects" item = the Xflora discard flow.** Confirm the label with the user (§6).
 
-3. **Instance host — confirmed `xflora.upande.com`.** `src/lib/config.ts` correctly locks `INSTANCE_HOST = 'xflora.upande.com'` (`normalizeUrl()` prepends `https://`). The Flutter `InstanceMapper`'s `https://xflora.fsn.frappe.cloud` entry is a **known bug** — that hostname fails DNS on mobile networks; the live instance is served at `xflora.upande.com`. No change needed to `config.ts`.
+3. **Instance host — SUPERSEDED. The app is multi-tenant as of 2026-09-17.** The host is now a
+validated field on the login form (any single-label `*.upande.com`), and `src/lib/config.ts` keeps
+only `LEGACY_PINNED_HOST` so the storage migration knows which tenant a pre-migration install
+belongs to. The Flutter `InstanceMapper`'s `https://xflora.fsn.frappe.cloud` entry remains a **known
+bug** — that hostname fails DNS on mobile networks; the live instance is served at
+`xflora.upande.com`. See STACK.md §Auth pattern and §Storage.
 
 4. **`src/lib/clients.ts` is stale and dormant.** Its Xflora feature matrix (`receiving+discards+shelving+issuing`) is wrong vs. the authoritative 8-item drawer, and `useClientStore.setClient` is **never called** anywhere — the whole multi-client abstraction is unused. Since this app is single-instance, strip it (§3).
 
@@ -159,7 +164,9 @@ Single-instance ⇒ the multi-client abstraction is dead weight (and currently u
 
 - **Delete** `src/lib/clients.ts`, `src/stores/client.ts`, `src/features/station/useClient.ts`.
 - **Grep and remove imports** of `useClient`, `useClientStore`, `ClientId`, `ClientConfig`, `CLIENT_REGISTRY`, `getClientConfig`. (Recon shows the only consumers are the dormant hook/store themselves; the drawer and screens don't gate on client today.)
-- **Keep** `src/lib/config.ts` as the single lock point (`INSTANCE_HOST`, `CLIENT_DISPLAY_NAME`). Verify the host (§6).
+- ~~**Keep** `src/lib/config.ts` as the single lock point (`INSTANCE_HOST`, `CLIENT_DISPLAY_NAME`).~~
+  **Superseded 2026-09-17:** the host is user-entered and allowlisted; `CLIENT_DISPLAY_NAME` is
+  deleted (a fixed client name is false on any other site). Only `LEGACY_PINNED_HOST` remains.
 - **Docs:** update STACK.md's "Multi-tenancy abstraction" and "Auth pattern" sections to reflect single-instance + cookie auth (doc-only; do not touch the working auth code).
 
 ---
