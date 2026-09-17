@@ -28,8 +28,8 @@
 
 ## HTTP client
 - **`axios`** with a single configured instance in `src/lib/api.ts`
-- **Auth:** `Authorization: token <api_key>:<api_secret>` header injected per-request via interceptor (no mutable shared headers)
-- **Base URL:** Read from Zustand auth store at request time (the user enters it at login)
+- **Auth:** `Cookie: sid=<sid>` injected per-request via interceptor (no mutable shared headers)
+- **Base URL:** Read from the Zustand auth store at request time
 - **Error normalization:** Single response interceptor mapping Frappe errors → typed `ApiError`
 
 ## UI / styling
@@ -71,13 +71,35 @@
 - **`useClient()` hook** — returns the current client config from Zustand; no raw string comparisons in components
 - v1 implements full Kikwetu config; other clients have stub configs and "Not yet ported" placeholder screens
 
-## Auth pattern (replaces Flutter cookie auth)
-- User enters URL + email + password on login
-- App calls `POST /api/method/login` with form body → receives session cookie (transient, in-memory only)
-- App calls `POST /api/method/frappe.core.doctype.user.user.generate_keys` with the cookie → receives api_key + api_secret
-- Cookie is discarded; api_key + api_secret are stored in `expo-secure-store`
-- Every future request uses `Authorization: token <api_key>:<api_secret>` header
-- The user never sees, types, or knows about the API key
+## Auth pattern — session cookie (`sid`)
+
+Same mechanism as the Flutter app. **There is no API-key step.**
+
+- The host is not typed by the user — it is pinned to `INSTANCE_HOST` in `src/lib/config.ts`
+  (`xflora.upande.com`). The login form takes email + password only.
+- `normalizeUrl()` (`src/features/auth/authService.ts`) tries `https://` with a 5s HEAD check and
+  falls back to `http://`.
+- App calls `POST /api/method/login` with a form body (`usr`, `pwd`). The `sid` is read out of the
+  response's `Set-Cookie` header — React Native's XHR exposes it; a browser would not.
+- A response whose `sid` is missing or literally `Guest` is treated as a failed login.
+- `sid` + `instanceUrl` are persisted to `expo-secure-store` (`SECURE_KEYS.SID`,
+  `SECURE_KEYS.INSTANCE_URL`) and hydrated into `useAuthStore` on launch by `src/app/_layout.tsx`.
+- Every subsequent request carries `Cookie: sid=<sid>`, injected by the `apiClient` request
+  interceptor in `src/lib/api.ts`.
+- `401` clears the store and deletes the stored `sid`, dropping the user at login. `403` is a normal
+  per-endpoint permission error and does **not** log out.
+
+### Cookie scope (verified against `xflora.upande.com`, 2026-09-17)
+
+Frappe sets the session cookie with **no `Domain` attribute**, so it is **host-only** — bound to
+`xflora.upande.com` exactly, not `.upande.com`:
+
+```
+set-cookie: sid=…; Expires=…; Max-Age=2592000; Secure; HttpOnly; Path=/; SameSite=Lax
+```
+
+Two consequences: a `sid` is never valid against a sibling `*.upande.com` site, and `Max-Age` is
+30 days, so a stored session outlives a shift but not a month of leave.
 
 ## Error tracking
 - **Sentry React Native** — new Sentry project (separate from Flutter), DSN in `.env`
