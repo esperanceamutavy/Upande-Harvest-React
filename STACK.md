@@ -79,8 +79,9 @@
 Same mechanism as the Flutter app. **There is no API-key step.**
 
 - **The host is typed by the user** on the login form, alongside email and password, and validated
-  by `parseSiteInput()` (`src/lib/siteUrl.ts`) against an anchored `*.upande.com` allowlist. Single
-  subdomain label only. `src/lib/config.ts` retains `LEGACY_PINNED_HOST` for one purpose — telling
+  by `parseSiteInput()` (`src/lib/siteUrl.ts`) against an anchored apex allowlist — `upande.com`
+  and `fsn.frappe.cloud`. Exactly one subdomain label before whichever apex matched, so
+  `a.b.upande.com` and `a.b.fsn.frappe.cloud` are both refused. `src/lib/config.ts` retains `LEGACY_PINNED_HOST` for one purpose — telling
   the storage migration which tenant a pre-migration install belongs to.
 - **https only.** `normalizeUrl()`'s HEAD probe and `http://` fallback are deleted. The login POST
   carries `usr`/`pwd` in a form body, so a silent downgrade would put a password in clear text; a

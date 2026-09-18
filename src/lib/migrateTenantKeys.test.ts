@@ -349,6 +349,7 @@ test('every composed key is legal for expo-secure-store', () => {
         'kaitet-group.upande.com',
         'mona-flowers-staging.upande.com',
         'a.upande.com',
+        'post-harvest.fsn.frappe.cloud',
     ];
     const keys = ['sid', 'fullname', 'email', 'userfarm'] as const;
     const legal = /^[A-Za-z0-9._-]+$/;

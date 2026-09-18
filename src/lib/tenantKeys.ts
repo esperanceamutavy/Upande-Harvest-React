@@ -57,8 +57,8 @@ const SEP = '__';
  *
  * Injective: logical key names contain no double underscore, so the last `__` in
  * a composed key always separates tenant from key. A tenant id can never be the
- * string `app`, because it must carry a `.upande.com` suffix to exist at all —
- * so the two namespaces cannot collide.
+ * string `app`, because it only exists by passing the allowlist in siteUrl.ts,
+ * which requires a label plus a dotted apex — so the two namespaces cannot collide.
  */
 export function tenantKey(tenantId: string, key: TenantKey): string {
   return `${tenantId}${SEP}${key}`;

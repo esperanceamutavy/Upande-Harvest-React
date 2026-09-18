@@ -81,6 +81,62 @@ test('a label over 63 characters is refused', () => {
     accepts(`${'a'.repeat(63)}.upande.com`, `${'a'.repeat(63)}.upande.com`);
 });
 
+// ── the second apex: fsn.frappe.cloud ────────────────────────────────────────
+//
+// Self-contained on purpose. If post-harvest moves to upande.com, this whole group
+// is deleted along with the alternative in SITE_HOST_RE.
+
+test('FSN — a single label under fsn.frappe.cloud is a site', () => {
+    accepts('post-harvest.fsn.frappe.cloud', 'post-harvest.fsn.frappe.cloud');
+    accepts('https://post-harvest.fsn.frappe.cloud/', 'post-harvest.fsn.frappe.cloud');
+    accepts('a-b--c.fsn.frappe.cloud', 'a-b--c.fsn.frappe.cloud');
+    accepts('1.fsn.frappe.cloud', '1.fsn.frappe.cloud');
+    // Legitimate, and it looks alarming enough to be "fixed" by mistake one day:
+    // this is the label `fsn` under fsn.frappe.cloud, not the bare apex.
+    accepts('fsn.fsn.frappe.cloud', 'fsn.fsn.frappe.cloud');
+});
+
+test('FSN — the bare apex is not a site', () => {
+    // The label cannot contain a dot, so `\.` must match the FIRST dot: label
+    // `fsn`, remainder `frappe.cloud`, which is not one of the alternatives.
+    // Backtracking to a shorter label needs a dot at index 2 or 1, where the
+    // input has `n` and `s`. No path. This rejection depends entirely on
+    // `frappe.cloud` NOT being an apex in its own right.
+    rejects('fsn.frappe.cloud', 'not-allowed');
+    rejects('frappe.cloud', 'not-allowed');
+});
+
+test('FSN — the single-label rule applies after the apex is stripped', () => {
+    rejects('a.b.fsn.frappe.cloud', 'not-allowed');
+    rejects('staging.post-harvest.fsn.frappe.cloud', 'not-allowed');
+});
+
+test('FSN — one apex may not be smuggled in as a label of the other', () => {
+    rejects('xflora.upande.com.fsn.frappe.cloud', 'not-allowed');
+    rejects('post-harvest.fsn.frappe.cloud.upande.com', 'not-allowed');
+    rejects('fsn.frappe.cloud.evil.com', 'not-allowed');
+});
+
+test('FSN — near misses on the apex itself are refused', () => {
+    rejects('xfsn.frappe.cloud', 'not-allowed'); // no dot boundary before the apex
+    rejects('x.frappe.cloud', 'not-allowed');
+    rejects('evilfsn.frappe.cloud', 'not-allowed');
+    rejects('x.fsn-frappe.cloud', 'not-allowed');
+    rejects('fsn.frappe.cloudx', 'not-allowed');
+    // The cross-product the atomic alternation exists to prevent: neither of these
+    // hosts exists, and a `(?:upande|fsn\.frappe)\.(?:com|cloud)` shape would
+    // accept both.
+    rejects('x.upande.cloud', 'not-allowed');
+    rejects('x.fsn.frappe.com', 'not-allowed');
+});
+
+test('FSN — edge hyphens and the length bound behave as on the other apex', () => {
+    rejects('-x.fsn.frappe.cloud', 'not-allowed');
+    rejects('x-.fsn.frappe.cloud', 'not-allowed');
+    rejects(`${'a'.repeat(64)}.fsn.frappe.cloud`, 'not-allowed');
+    accepts(`${'a'.repeat(63)}.fsn.frappe.cloud`, `${'a'.repeat(63)}.fsn.frappe.cloud`);
+});
+
 test('underscores are not legal in a hostname', () => {
     // Caught by the charset gate rather than the allowlist — `_` is not a legal
     // hostname character at all, so it never reaches the regex.
@@ -156,6 +212,7 @@ test('parsing an origin returns the same site — pre-fill depends on this', () 
         'kikwetu.upande.com',
         'kaitet-group.upande.com',
         'mona-flowers-staging.upande.com',
+        'post-harvest.fsn.frappe.cloud',
     ]) {
         const first = parseSiteInput(host);
         assert.equal(first.ok, true);
@@ -177,6 +234,7 @@ test('hostFromOrigin inverts origin, and refuses anything it should not', () => 
 
 test('isAllowedSiteHost is the regex alone and assumes a clean host', () => {
     assert.equal(isAllowedSiteHost('xflora.upande.com'), true);
+    assert.equal(isAllowedSiteHost('post-harvest.fsn.frappe.cloud'), true);
     assert.equal(isAllowedSiteHost('XFLORA.UPANDE.COM'), false); // caller lowercases
     assert.equal(isAllowedSiteHost('evil.com'), false);
 });

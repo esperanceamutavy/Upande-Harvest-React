@@ -25,10 +25,11 @@ decisions, read:
 7. Do not commit `node_modules`, `.expo`, `ios/`, `android/` build outputs, or environment files with secrets.
 
 ## Scope reminder
-- **Multi-tenant.** The site is a validated field on the login form, any single-label
-  `*.upande.com` host. One live session at a time; switching sites tears the previous one down on
-  the server as well as locally. `LEGACY_PINNED_HOST` in `src/lib/config.ts` is only the storage
-  migration's answer to "which tenant did this install used to be?".
+- **Multi-tenant.** The site is a validated field on the login form: one label under either
+  `upande.com` or `fsn.frappe.cloud` (the latter serves post-harvest). One live session at a time;
+  switching sites tears the previous one down on the server as well as locally.
+  `LEGACY_PINNED_HOST` in `src/lib/config.ts` is only the storage migration's answer to "which
+  tenant did this install used to be?".
 - Bluetooth thermal printing = v1.1 (requires dev build). Not in v1.
 - Auth = **session cookie**. The app stores the `sid` from `POST /api/method/login` and replays it as
   `Cookie: sid=<sid>`. There is NO `generate_keys` step and NO `Authorization: token` header.
@@ -39,11 +40,13 @@ These are not preferences. Breaking one costs a rebuild, a lost session, or a pr
 
 1. **Prefer OTA-shippable changes.** Flag any new native dependency explicitly — it forces an
    `eas build` and a store round-trip, not an `eas update`.
-2. **User-entered site URLs validate against an allowlist of `*.upande.com`, and are https-only.**
-   Done: `parseSiteInput()` in `src/lib/siteUrl.ts` is the only way to obtain a host, and
+2. **User-entered site URLs validate against an apex allowlist, and are https-only.**
+   `parseSiteInput()` in `src/lib/siteUrl.ts` is the only way to obtain a host, and
    `normalizeUrl()`'s HEAD probe and `http://` fallback are deleted. The login POST carries
    `usr`/`pwd` in a form body, so a silent downgrade to `http://` would put a password on the wire
    in clear text. Never reintroduce a scheme fallback.
+   **Before adding an apex: no apex may be a proper suffix of another.** Adding `frappe.cloud`
+   alongside `fsn.frappe.cloud` would silently admit every tenant on Frappe Cloud as a site.
 3. **All persisted keys are namespaced by tenant id.** Never write an unprefixed key. Enforced by
    eslint: only `src/lib/storage.ts` may import AsyncStorage or `expo-secure-store`. The two
    exceptions are `app__active_tenant` and `app__last_site`, which exist because SecureStore has no

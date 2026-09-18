@@ -43,13 +43,30 @@ export type SiteError =
 
 export type SiteParse = { ok: true; site: ValidSite } | { ok: false; reason: SiteError };
 
-// Anchored at both ends. The label class excludes `.`, so EXACTLY ONE label may
-// precede `upande.com` — `a.b.upande.com` is refused. Every host we have seen in
-// the wild is single-label, and loosening this later is a one-line change whereas
-// tightening it later would lock people out.
+// Anchored at both ends. EXACTLY ONE label, then one apex, then end of input.
+//
+// Why that is unambiguous even though an apex may itself contain dots: every class
+// in the label portion excludes `.`, so whatever the label consumes is dot-free and
+// the `\.` after it is necessarily the FIRST dot in the host. Everything past that
+// dot is matched by bare literals against `$`. So an accepted host decomposes
+// uniquely as <label>.<apex>, and a label can never absorb part of an apex — it
+// would have to swallow a dot to do it. `a.b.upande.com` and `a.b.fsn.frappe.cloud`
+// are both refused by the same mechanism.
 //
 // No leading or trailing hyphen; 1-63 characters.
-const SITE_HOST_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.upande\.com$/;
+//
+// ⚠️ NO APEX MAY BE A PROPER SUFFIX OF ANOTHER. Adding `frappe.cloud` as a third
+// apex would silently make `fsn.frappe.cloud` an accepted *site* (label `fsn`) —
+// and with it every other tenant on Frappe Cloud. Check this before extending.
+//
+// `fsn.frappe.cloud` is the Frappe Cloud hostname serving post-harvest, which is
+// not on upande.com. It is listed separately rather than folded into a
+// `(?:upande|fsn\.frappe)\.(?:com|cloud)` shape on purpose: that shape would form
+// a cross-product and accept `x.upande.cloud` and `x.fsn.frappe.com`, neither of
+// which exists. Each apex stays atomic. If post-harvest moves to upande.com, the
+// removal is this alternative, this paragraph, and the FSN group in the tests.
+const SITE_HOST_RE =
+  /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:upande\.com|fsn\.frappe\.cloud)$/;
 
 /** The allowlist on its own, for callers that already hold a clean lowercase host. */
 export function isAllowedSiteHost(host: string): boolean {
@@ -108,10 +125,13 @@ export function parseSiteInput(raw: string): SiteParse {
 
   // tenantId is the FULL HOST, not the subdomain label. The label is unique only
   // relative to a fixed apex: that is a property of this allowlist, not of the
-  // data, and it would be destroyed silently the first time a second apex is added
-  // (a staging apex, a customer's own domain). At that moment two different servers
-  // would share a storage namespace and one tenant would read the other's session.
-  // The full host costs nothing and makes the origin reconstructible from the key.
+  // data, and it would be destroyed silently the first time a second apex is added.
+  //
+  // That is no longer hypothetical — fsn.frappe.cloud arrived. Under a label scheme
+  // `post-harvest.fsn.frappe.cloud` and `post-harvest.upande.com` would now share a
+  // storage namespace, and one site could read the other's session. Because the id
+  // is the full host they get distinct namespaces, and adding the apex needed no
+  // migration at all. Leave this as the full host.
   return { ok: true, site: { host: s, origin: `https://${s}`, tenantId: s } };
 }
 
@@ -140,6 +160,6 @@ export function siteErrorMessage(reason: SiteError): string {
     case 'charset':
       return 'Site address contains invalid characters';
     case 'not-allowed':
-      return 'Must be a .upande.com site';
+      return 'Must be a .upande.com or .fsn.frappe.cloud site';
   }
 }
