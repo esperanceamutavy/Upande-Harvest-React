@@ -21,7 +21,10 @@ function toRow(r: Record<string, unknown>): OplRow {
     warehouse: r.warehouse != null ? String(r.warehouse) : null,
     shelf: r.custom_shelf != null ? String(r.custom_shelf) : null,
     qty: Number(r.qty ?? 0),
-    packRate: r.custom_packrate != null ? String(r.custom_packrate) : null,
+    // custom_packrate is NOT mapped here on purpose. It was read, never used,
+    // and is in an unknown unit besides — see packrate.ts. The per-box target
+    // comes from the Sales Order line via useSalesOrderTargets, which is the
+    // only place equipped to decide what the number means.
   };
 }
 

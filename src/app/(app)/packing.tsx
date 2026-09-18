@@ -18,6 +18,7 @@ import { formatBoxRanges, resumePlan } from '../../features/packing/resume';
 import { compareLength, displayLength } from '../../features/packing/lengths';
 import { effectiveStemLength, matchBunchToOpl } from '../../features/packing/bunchMatch';
 import { filterOpls } from '../../features/packing/oplSearch';
+import { parseStemsPerBunch } from '../../features/packing/targets';
 import { useBunchDetails } from '../../features/packing/useBunchDetails';
 import {
   classifyPackError,
@@ -251,12 +252,23 @@ export default function PackingScreen() {
       }
       // Targets come from the SALES ORDER, never the OPL — the allocator is
       // broken and OPL quantities cannot be trusted (§8.3).
+      // Bunch size across the WHOLE pick list, not just row 0. A bunch is 10
+      // stems on one order and 7 or 9 on another, and a single OPL can carry
+      // more than one size — BOX-OPL-2026-05502-1 holds Bunch(10) and Bunch(9)
+      // rows in one box. Taking row 0 as representative would state a bunch
+      // target the other rows do not share; when they disagree we count stems.
+      const oplBunchSizes = new Set(
+        opl.rows
+          .map((r) => parseStemsPerBunch(r.uom))
+          .filter((n): n is number => n != null),
+      );
       const targets = await targetsMut.mutateAsync({
         salesOrder: opl.salesOrder,
         oplName: opl.name,
         // First choice for resolving bunch size; the SO's custom_bunching is
         // the fallback when the OPL row's uom is not Bunch(N).
         oplUom: opl.rows[0]?.uom ?? '',
+        mixedBunchSizes: oplBunchSizes.size > 1,
       });
 
       // RESUME, do not restart. Reopening a partially packed OPL used to show

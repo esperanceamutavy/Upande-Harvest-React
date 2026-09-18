@@ -1,3 +1,5 @@
+import type { PackrateBasis } from '../features/packing/packrate.ts';
+
 import type { ResumeState } from '../features/packing/resume';
 
 // Packing contract — confirmed against the live Server Script and live OPL
@@ -45,9 +47,6 @@ export interface OplRow {
   shelf: string | null;
   /** Bunches, and CAN BE FRACTIONAL (e.g. 8.5, 0.8). Never used for box maths. */
   qty: number;
-  /** The per-box cap. A string on the wire; identical across an OPL's rows.
-   *  Named "packrate" upstream — see the unit caveat on `totalUnits`. */
-  packRate: string | null;
 }
 
 /** Packing progress, the picker's second filter dimension. */
@@ -170,6 +169,11 @@ export interface SalesOrderTargets {
    * labelled "bunches".
    */
   stemsPerBunch: number | null;
+
+  /** Which rule in `packrate.ts` decided the unit — `integrality` and
+   *  `stems-uom` are arithmetic, `plausibility` is a heuristic, and `inexact` /
+   *  `unresolved` mean the count fell back to honest stems. */
+  basis: PackrateBasis;
 
   /** What `capPerBox` and `orderTotal` are counted in. NEVER say "bunches"
    *  unless `stemsPerBunch` actually resolved. */

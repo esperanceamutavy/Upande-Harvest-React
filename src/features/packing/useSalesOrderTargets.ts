@@ -38,11 +38,14 @@ async function fetchSalesOrderTargets({
   salesOrder,
   oplName,
   oplUom,
+  mixedBunchSizes = false,
 }: {
   salesOrder: string;
   oplName: string;
   /** The OPL row's uom — first choice for resolving bunch size. */
   oplUom: string;
+  /** True when the OPL's rows state more than one distinct Bunch(N) size. */
+  mixedBunchSizes?: boolean;
 }): Promise<SalesOrderTargets> {
   const res = await apiClient.get<{ data?: Record<string, unknown> }>(
     `/api/resource/${encodeURIComponent('Sales Order')}/${encodeURIComponent(salesOrder)}`,
@@ -141,7 +144,28 @@ async function fetchSalesOrderTargets({
     conversionFactor,
     oplUom,
     bunching: doc.custom_bunching != null ? String(doc.custom_bunching) : '',
+    mixedBunchSizes,
   });
+
+  // The plausibility branch is a HEURISTIC, so every line that lands on it is
+  // announced. Production logs are how we learn which orders are ambiguous —
+  // waiting for a packer to report a wrong box is the alternative, and by then
+  // the box is packed.
+  if (units.basis === 'plausibility') {
+    console.warn(
+      `[packing] pack rate unit resolved by PLAUSIBILITY, not arithmetic — ` +
+        `${salesOrder} line ${row.item_code != null ? String(row.item_code) : '?'} ` +
+        `(opl ${oplName}, uom "${uom}", packrate ${packRate}): ` +
+        `reading it as ${units.capPerBox} ${units.unitLabel} per box`,
+    );
+  }
+  if (units.basis === 'inexact' || units.basis === 'unresolved') {
+    console.warn(
+      `[packing] pack rate could not be expressed in bunches — ` +
+        `${salesOrder} line ${row.item_code != null ? String(row.item_code) : '?'} ` +
+        `(opl ${oplName}, basis ${units.basis}): counting STEMS`,
+    );
+  }
 
   return {
     salesOrder,
@@ -163,6 +187,7 @@ async function fetchSalesOrderTargets({
     unitLabel: units.unitLabel,
     capPerBox: units.capPerBox,
     orderTotal: units.orderTotal,
+    basis: units.basis,
     // Used directly rather than derived — it is already correct on the SO and
     // taking it avoids inventing a rounding rule for the trailing box.
     boxCount: boxCount > 0 ? boxCount : 1,

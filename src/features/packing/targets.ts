@@ -1,7 +1,7 @@
 // Unit resolution for the packing cap.
 //
 // Extracted from the Sales Order fetch so it can be tested without a network
-// call — see targets.test.ts, which pins it against both live orders.
+// call — see targets.test.ts, which pins it against the live orders.
 //
 // THE PROBLEM THIS SOLVES: `custom_packrate` and `qty` are expressed in the SO
 // line's uom, and that uom is not always bunches.
@@ -12,6 +12,14 @@
 // On the Stems order, 200 is 20 bunches. Showing "200 bunches" meant the cap
 // was unreachable and the box could not close. `conversion_factor` does not
 // help — on a Stems line it is 1, not the bunch size.
+//
+// AND A Bunch(N) UOM IS NOT PROOF THE PACKRATE IS BUNCHES. That assumption was
+// this module's original early return, and it is what showed "78 of 260" on
+// SAL-ORD-2026-02165-1 (Jazzbery, uom Bunch(10), packrate 260 STEMS) — 78
+// bunches was already three full boxes of 26. Deciding stems-or-bunches is now
+// packrate.ts's job; this module resolves the bunch SIZE and applies the answer.
+
+import { resolvePackratePerBox, type PackrateBasis } from './packrate.ts';
 
 /** `"Bunch(10)"` → 10. The server's own paren rule. */
 export function parseStemsPerBunch(uom: string): number | null {
@@ -38,6 +46,17 @@ export interface TargetUnitInput {
   oplUom: string;
   /** The Sales Order's `custom_bunching` — second choice. */
   bunching: string;
+  /**
+   * The OPL's rows do not agree on a bunch size — e.g. BOX-OPL-2026-05502-1
+   * carries Bunch(10) and Bunch(9) rows in one box.
+   *
+   * When they disagree there is no single number of stems a "bunch" means on
+   * this pick list, so no bunch target can be honest and the session counts
+   * stems. A bunch size is also NOT always stated by the order: the SO may say
+   * Stems and leave the real size to whatever the scanned QR carries, which is
+   * per-bunch and not knowable before the first scan.
+   */
+  mixedBunchSizes?: boolean;
 }
 
 export interface TargetUnits {
@@ -45,6 +64,8 @@ export interface TargetUnits {
   capPerBox: number;
   orderTotal: number;
   stemsPerBunch: number | null;
+  /** Which rule in packrate.ts decided the unit. Logged when it is a heuristic. */
+  basis: PackrateBasis;
 }
 
 /**
@@ -57,37 +78,43 @@ export interface TargetUnits {
  *   3. neither — count STEMS, label them stems, and do not divide
  */
 export function resolveTargetUnits(input: TargetUnitInput): TargetUnits {
-  const { uom, packRate, qty, conversionFactor, oplUom, bunching } = input;
+  const { uom, packRate, qty, oplUom, bunching } = input;
 
-  const stemsPerBunch = parseStemsPerBunch(oplUom) ?? parseBunching(bunching) ?? null;
-  const soIsBunchUom = /^\s*bunch\s*\(/i.test(uom);
+  // Bunch SIZE only. The SO line's own uom is consulted too, since a Bunch(N)
+  // line states its size there even when the OPL row says Stems.
+  const stemsPerBunch =
+    parseStemsPerBunch(oplUom) ?? parseStemsPerBunch(uom) ?? parseBunching(bunching) ?? null;
+  const uomIsBunch = /^\s*bunch\s*\(/i.test(uom);
 
-  // Already counted in bunches — dividing here would double-convert.
-  if (soIsBunchUom) {
+  // Rows disagreeing on bunch size is decisive on its own: nothing downstream
+  // could interpret a single "bunches" figure across them.
+  if (input.mixedBunchSizes) {
     return {
-      unitLabel: 'bunches',
-      capPerBox: Math.max(1, Math.round(packRate)),
-      orderTotal: Math.max(1, Math.round(qty)),
+      unitLabel: 'stems',
+      capPerBox: Math.max(1, packRate),
+      orderTotal: Math.max(1, qty),
       stemsPerBunch,
+      basis: 'unresolved',
     };
   }
 
-  // Stems on the wire, bunches on the bench.
-  if (stemsPerBunch) {
-    return {
-      unitLabel: 'bunches',
-      capPerBox: Math.max(1, Math.round(packRate / stemsPerBunch)),
-      orderTotal: Math.max(1, Math.round((qty * conversionFactor) / stemsPerBunch)),
-      stemsPerBunch,
-    };
+  const resolved = resolvePackratePerBox({ packrate: packRate, stemsPerBunch, uomIsBunch });
+
+  // No usable pack rate. useSalesOrderTargets already rejects this before we get
+  // here, with the order name in the message; this keeps the function total.
+  if (!resolved) {
+    return { unitLabel: 'stems', capPerBox: 1, orderTotal: 1, stemsPerBunch, basis: 'unresolved' };
   }
 
-  // Bunch size unknown from either source. Count stems and SAY stems — showing
-  // a stem count as "bunches" is exactly the blocker this exists to prevent.
+  // `qty` is in the SAME unit as `packRate` — that is the invariant the whole
+  // rule rests on — so the one divisor converts both, and qty/packrate == boxes
+  // survives the conversion. conversionFactor is deliberately NOT applied: it
+  // describes uom, and on these lines the uom is exactly what cannot be trusted.
   return {
-    unitLabel: 'stems',
-    capPerBox: Math.max(1, Math.round(packRate)),
-    orderTotal: Math.max(1, Math.round(qty * conversionFactor)),
-    stemsPerBunch: null,
+    unitLabel: resolved.unitLabel,
+    capPerBox: Math.max(1, resolved.perBox),
+    orderTotal: Math.max(1, qty / resolved.qtyDivisor),
+    stemsPerBunch,
+    basis: resolved.basis,
   };
 }
