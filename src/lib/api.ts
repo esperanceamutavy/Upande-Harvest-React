@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 
 import type { ApiError, FrappeErrorBody } from '../types/frappe';
+import { readableServerMessage, stripHtml } from './frappeMessage.ts';
 import { TENANT_KEYS, removeItemFor } from './storage';
 import { useAuthStore } from '../stores/auth';
 
@@ -12,7 +13,10 @@ function parseFrappeError(error: AxiosError<FrappeErrorBody>): ApiError {
   if (data?._server_messages) {
     try {
       const parsed = JSON.parse(data._server_messages) as Array<{ message: string }>;
-      serverMessages = parsed.map((m) => m.message);
+      // Strip at the boundary. Frappe hands us HTML — ERPNext's own
+      // NegativeStockError ships two <a href="/desk/..."> tags — and every
+      // screen renders this string into a <Text>, which shows markup verbatim.
+      serverMessages = parsed.map((m) => stripHtml(m.message)).filter(Boolean);
     } catch {
       // malformed _server_messages — ignore
     }
@@ -21,12 +25,13 @@ function parseFrappeError(error: AxiosError<FrappeErrorBody>): ApiError {
   return {
     status,
     excType: data?.exc_type,
-    message:
-      serverMessages[0] ??
-      data?.message ??
-      data?.exception ??
-      error.message ??
-      'Unknown error',
+    // `??` was the bug's other half: a message of pure markup stripped to ''
+    // is still not null, so it would win over a usable fallback.
+    message: readableServerMessage(serverMessages, [
+      data?.message,
+      data?.exception,
+      error.message,
+    ]),
     serverMessages,
   };
 }
