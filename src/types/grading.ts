@@ -40,6 +40,30 @@ export interface GradingResult {
   qty: number | null;
 }
 
+/** One variety inside a bouquet, from the `Bunch Component` child table. */
+export interface GradedComponent {
+  variety: string;
+  stems: number;
+  stemLength: string | null;
+}
+
+/** What a scanned bunch turns out to BE, read off `Bunch QR Code`.
+ *
+ *  `mobile_grading_entry` does not return any of this: it reads only
+ *  `item_code, stem_length, bunch_size, farm` and answers with `item_code`,
+ *  which the doctype's own field description calls out as naming the FIRST
+ *  variety only. A bouquet's recipe therefore has to be read separately —
+ *  concurrently with the grade, never before it. See bunchRecipe.ts. */
+export interface BunchRecipe {
+  isMixedBunch: boolean;
+  /** `bunch_size`, e.g. `Bunch(20)`. The identity of a bouquet, since no single
+   *  variety can stand for it. */
+  bunchUom: string | null;
+  bunchName: string | null;
+  /** Empty for a mono bunch, and for a bouquet whose recipe could not be read. */
+  components: GradedComponent[];
+}
+
 /** Outcome of one bunch scan.
  *
  *  `duplicate` is split out from `error` because re-scanning an already-graded
@@ -55,9 +79,18 @@ export interface GradingEntry {
   bunchId: string;
   grader: string;
   status: GradingEntryStatus;
-  /** Server-resolved on success; null otherwise. */
+  /** Server-resolved on success; null otherwise.
+   *
+   *  ⚠️ For a BOUQUET this is `item_code`, which names only the FIRST of several
+   *  varieties. Never render it for a mixed bunch — use `components`. */
   variety: string | null;
   qty: number | null;
+  /** True when the scanned bunch is a bouquet. */
+  isMixedBunch: boolean;
+  /** `bunch_size`, e.g. `Bunch(20)` — what a bouquet is named by. */
+  bunchUom: string | null;
+  /** Every variety in a bouquet with its stem count. Empty for a mono bunch. */
+  components: GradedComponent[];
   /** Error text on failure; the server's confirmation on success. */
   message: string;
   /** Local wall-clock, display only. */

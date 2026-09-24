@@ -16,6 +16,7 @@ import { Card, Notice, type NoticeTone } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
 import { Screen } from '../../components/ui/Screen';
 import { colors, radii, spacing } from '../../components/ui/theme';
+import { componentLabel, fetchBunchRecipe, gradedHeadline } from '../../features/grading/bunchRecipe';
 import type { GradingEntry } from '../../types/grading';
 
 // Grading. Two scans, ONE server call:
@@ -37,7 +38,10 @@ import type { GradingEntry } from '../../types/grading';
 
 const MAX_LOG_ROWS = 12;
 
-type FeedbackMsg = { tone: NoticeTone; text: string };
+// `lines` carries a bouquet's recipe under the headline. A bouquet names no
+// variety in its confirmation — it has several and item_code names only the
+// first — so this list is what identifies what was just graded.
+type FeedbackMsg = { tone: NoticeTone; text: string; lines?: string[] };
 type Slot = 'grader' | 'bunch';
 
 // The server's duplicate-scan rejection is
@@ -128,18 +132,41 @@ export default function GradingScreen() {
     isProcessingRef.current = true;
     setFeedback(null);
     try {
-      const res = await submitMut.mutateAsync({ bunchId, grader, farm: farm!.farm });
+      // CONCURRENTLY, not before. The grade is the critical path and §8.2 cut a
+      // pre-flight read off this screen for costing 150-300ms a scan; issuing the
+      // recipe lookup alongside the post costs nothing unless it outlasts a
+      // Stock Entry insert-submit-commit. `allSettled` because a failed lookup
+      // must never lose a grade — it degrades to naming the variety, as before.
+      const [graded, recipeSettled] = await Promise.allSettled([
+        submitMut.mutateAsync({ bunchId, grader, farm: farm!.farm }),
+        fetchBunchRecipe(bunchId),
+      ]);
+      if (graded.status === 'rejected') throw graded.reason;
+
+      const res = graded.value;
+      const recipe = recipeSettled.status === 'fulfilled' ? recipeSettled.value : null;
       playSubmit();
 
-      const stems = res.qty != null ? `${res.qty} stems` : 'graded';
-      const variety = res.variety ? ` · ${res.variety}` : '';
-      setFeedback({ tone: 'success', text: `Graded: ${stems}${variety}` });
+      const isMixedBunch = recipe?.isMixedBunch ?? false;
+      const components = recipe?.components ?? [];
+      const bunchUom = recipe?.bunchUom ?? null;
+
+      setFeedback({
+        tone: 'success',
+        text: gradedHeadline({ isMixedBunch, bunchUom, qty: res.qty, variety: res.variety }),
+        // A bouquet names no variety in its headline, so the recipe goes
+        // beneath it — that list IS the identification.
+        lines: isMixedBunch ? components.map(componentLabel) : undefined,
+      });
       logEntry({
         bunchId,
         grader,
         status: 'success',
         variety: res.variety,
         qty: res.qty,
+        isMixedBunch,
+        bunchUom,
+        components,
         message: res.message,
       });
     } catch (e) {
@@ -160,6 +187,9 @@ export default function GradingScreen() {
         status: duplicate ? 'duplicate' : 'error',
         variety: null,
         qty: null,
+        isMixedBunch: false,
+        bunchUom: null,
+        components: [],
         message,
       });
     } finally {
@@ -277,7 +307,14 @@ export default function GradingScreen() {
         </Card>
       ) : null}
 
-      {feedback ? <Notice tone={feedback.tone}>{feedback.text}</Notice> : null}
+      {feedback ? (
+        <Notice tone={feedback.tone}>
+          {feedback.text}
+          {feedback.lines?.length
+            ? `\n${feedback.lines.join('\n')}`
+            : ''}
+        </Notice>
+      ) : null}
 
       {entries.length > 0 ? (
         <Card title="This session">
@@ -317,12 +354,20 @@ function EntryRow({ entry }: { entry: GradingEntry }) {
         ? styles.logDuplicate
         : null;
 
+  // A BOUQUET LISTS ITS RECIPE, never `entry.variety` — that is `item_code`, and
+  // it names only the first of several varieties. BUNCH-289162 would read
+  // "Good Times · 20 stems" for a bunch that is 7 Good Times, 7 Albatross and
+  // 6 Brinessa. The size identifies it; the components say what it holds.
   const detail =
-    entry.status === 'success'
-      ? [entry.variety, entry.qty != null ? `${entry.qty} stems` : null]
-          .filter(Boolean)
-          .join(' · ') || entry.message
-      : entry.message;
+    entry.status !== 'success'
+      ? entry.message
+      : entry.isMixedBunch
+        ? [entry.bunchUom, entry.components.map(componentLabel).join(' · ') || null]
+            .filter(Boolean)
+            .join(' · ') || entry.message
+        : [entry.variety, entry.qty != null ? `${entry.qty} stems` : null]
+            .filter(Boolean)
+            .join(' · ') || entry.message;
 
   return (
     <View style={styles.logRow}>
