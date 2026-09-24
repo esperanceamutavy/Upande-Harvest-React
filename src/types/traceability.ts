@@ -28,11 +28,27 @@ export interface BoxContent {
     length: string | null;
 }
 
+/** One variety inside a bouquet, from the `Bunch Component` child table. */
+export interface TraceComponent {
+    variety: string;
+    stems: number;
+    stemLength: string | null;
+}
+
 export interface BunchCurrent {
+    /**
+     * ⚠️ On a MIXED bunch this is `item_code`, which names only the FIRST of
+     * several varieties — Bunch QR Code's own field description says so. Never
+     * lead with it when `mixed` is true; use `components`.
+     */
     itemCode: string | null;
     farm: string | null;
     bunchSize: string | null;
     stemLength: string | null;
+    /** True when this label is a bouquet. */
+    mixed: boolean;
+    /** The recipe, in idx order. Empty for a mono bunch. */
+    components: TraceComponent[];
 }
 
 export interface BucketCurrent {

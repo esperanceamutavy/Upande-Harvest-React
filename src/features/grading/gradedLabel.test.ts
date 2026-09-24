@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { componentLabel, gradedHeadline } from './gradedLabel.ts';
+import { bunchIdentity, componentLabel, gradedHeadline } from './gradedLabel.ts';
 
 // Pinned to the live bunch that exposed the bug.
 //
@@ -83,4 +83,16 @@ test('a bouquet with neither size nor count still says what it is', () => {
 
 test('a component with no stems recorded still names its variety', () => {
     assert.equal(componentLabel({ variety: 'Albatross-35CM', stems: 0, stemLength: null }), 'Albatross-35CM 0');
+});
+
+// Grading and traceability must say the same thing about the same bunch.
+test('bunchIdentity is the size, and grading is that plus a verb', () => {
+    const opts = { isMixedBunch: true, bunchUom: 'Bunch(20)', qty: 20 };
+    assert.equal(bunchIdentity(opts), 'Bunch(20)');
+    assert.equal(gradedHeadline({ ...opts, variety: 'Good Times-35CM' }), 'Bunch(20) graded');
+});
+
+test('bunchIdentity falls back to the count, never to a variety', () => {
+    assert.equal(bunchIdentity({ isMixedBunch: true, bunchUom: null, qty: 20 }), '20 stems');
+    assert.equal(bunchIdentity({ isMixedBunch: true, bunchUom: null, qty: null }), 'Bouquet');
 });

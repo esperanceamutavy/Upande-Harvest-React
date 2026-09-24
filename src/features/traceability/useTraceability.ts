@@ -130,11 +130,26 @@ async function lookup(refId: string): Promise<TraceResult> {
 
     // Default to bunch: it is the only remaining kind the script emits, and a
     // future one would still render as a history rather than blanking.
+    // A BOUQUET'S IDENTITY IS ITS RECIPE, not item_code — which names only the
+    // first of its varieties. `mixed` is the server's flag saying so; it is
+    // absent on older responses, hence the explicit falsy default rather than a
+    // truthiness read of a missing key.
+    const components = rows(current.components).map((c) => {
+        const row = c as Record<string, unknown>;
+        return {
+            variety: String(row.variety ?? '').trim(),
+            stems: Number(row.stems ?? 0) || 0,
+            stemLength: str(row.stem_length),
+        };
+    }).filter((c) => c.variety.length > 0);
+
     const bunch: BunchCurrent = {
         itemCode: str(current.item_code),
         farm: str(current.farm),
         bunchSize: str(current.bunch_size),
         stemLength: str(current.stem_length),
+        mixed: Number(current.mixed ?? 0) === 1 || current.mixed === true,
+        components,
     };
     return {
         exists: true,

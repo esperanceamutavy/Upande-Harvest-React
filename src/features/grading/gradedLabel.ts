@@ -13,6 +13,27 @@ export interface LabelledComponent {
 }
 
 /**
+ * WHAT A BOUQUET IS, with no verb attached.
+ *
+ * A bouquet carries several varieties and `item_code` names only the first, so
+ * naming one would be actively misleading — worse than naming none. The SIZE is
+ * what identifies it; the varieties are listed separately.
+ *
+ * Split out so grading and traceability say the same thing about the same bunch:
+ * grading appends "graded", traceability uses it bare as a heading. One
+ * definition, so the two cannot drift.
+ */
+export function bunchIdentity(opts: {
+    isMixedBunch: boolean;
+    bunchUom: string | null;
+    qty: number | null;
+}): string {
+    if (opts.bunchUom) return opts.bunchUom;
+    // The size is missing — say the count rather than inventing a variety.
+    return opts.qty != null ? `${opts.qty} stems` : 'Bouquet';
+}
+
+/**
  * The confirmation line for a graded bunch.
  *
  * A BOUQUET names no variety. It carries several and `item_code` names only the
@@ -29,11 +50,7 @@ export function gradedHeadline(opts: {
     qty: number | null;
     variety: string | null;
 }): string {
-    if (opts.isMixedBunch) {
-        if (opts.bunchUom) return `${opts.bunchUom} graded`;
-        // The size is missing — say the count rather than inventing a variety.
-        return opts.qty != null ? `${opts.qty} stems graded` : 'Bouquet graded';
-    }
+    if (opts.isMixedBunch) return `${bunchIdentity(opts)} graded`;
     const stems = opts.qty != null ? `${opts.qty} stems` : 'graded';
     return `Graded: ${stems}${opts.variety ? ` · ${opts.variety}` : ''}`;
 }

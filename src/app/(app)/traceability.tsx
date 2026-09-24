@@ -16,6 +16,7 @@ import { BarcodeScannerOverlay } from '../../features/scanning/BarcodeScannerOve
 import { extractScannedId } from '../../lib/qr';
 import { playSubmit, playError } from '../../lib/audio';
 import { haptics } from '../../lib/haptics';
+import { bunchIdentity, componentLabel } from '../../features/grading/gradedLabel';
 import { Card, Notice } from '../../components/ui/Card';
 import { Field } from '../../components/ui/Field';
 import { Screen } from '../../components/ui/Screen';
@@ -226,12 +227,36 @@ function BunchView({
       </Card>
 
       <Card title={refId}>
-        <View style={styles.rows}>
-          <DetailRow label="Variety" value={current.itemCode} />
-          <DetailRow label="Bunch size" value={current.bunchSize} />
-          <DetailRow label="Stem length" value={current.stemLength} />
-          <DetailRow label="Farm" value={current.farm} />
-        </View>
+        {/* A BOUQUET NAMES NO SINGLE VARIETY. item_code is the first of several,
+            so leading with it says "20 Good Times" for a bunch that is 7 Good
+            Times, 7 Albatross and 6 Brinessa. The size identifies it and the
+            recipe says what it holds — the same treatment the grading screen
+            gives, via the same formatters so the two cannot drift apart. */}
+        {current.mixed ? (
+          <View style={styles.rows}>
+            <Text style={styles.lead}>
+              {bunchIdentity({
+                isMixedBunch: true,
+                bunchUom: current.bunchSize,
+                qty: null,
+              })}
+            </Text>
+            {current.components.map((c, idx) => (
+              <Text key={`${c.variety}-${idx}`} style={styles.leadSub}>
+                {componentLabel(c)}
+                {c.stemLength ? ` · ${c.stemLength}` : ''}
+              </Text>
+            ))}
+            <DetailRow label="Farm" value={current.farm} />
+          </View>
+        ) : (
+          <View style={styles.rows}>
+            <DetailRow label="Variety" value={current.itemCode} />
+            <DetailRow label="Bunch size" value={current.bunchSize} />
+            <DetailRow label="Stem length" value={current.stemLength} />
+            <DetailRow label="Farm" value={current.farm} />
+          </View>
+        )}
       </Card>
 
       <EventList events={events} />
