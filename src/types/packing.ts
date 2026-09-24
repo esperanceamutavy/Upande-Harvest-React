@@ -1,6 +1,7 @@
 import type { PackrateBasis } from '../features/packing/packrate.ts';
 
 import type { ResumeState } from '../features/packing/resume';
+import type { PackMode } from '../features/packing/mixGroup';
 
 // Packing contract — confirmed against the live Server Script and live OPL
 // documents on xflora.upande.com. RESTYLE_PLAN.md §8.3.
@@ -184,6 +185,27 @@ export interface SalesOrderTargets {
   orderTotal: number;
   /** `custom_number_of_boxes`, taken directly. The M in "Box N of M". */
   boxCount: number;
+
+  /**
+   * How this pick list's line set was resolved — `straight` matched on
+   * `custom_opl`, the other two matched on the GROUP because the allocator does
+   * not write `custom_opl` to every line of a mix. See mixGroup.ts.
+   */
+  packMode: PackMode;
+
+  /**
+   * Every Sales Order line in the group, in order.
+   *
+   * The screen LISTS these for a mix, and Rule 3 matches VARIETY against them.
+   * `item_locations` can do neither job on a mix: a variety the allocator never
+   * reached has no row there, so it would be invisible and unscannable — which
+   * is the bug this set exists to fix.
+   *
+   * `variety` is the TEMPLATE, `itemCode` the variant as written on the line.
+   * Match on `variety`; a 60CM bunch is valid against a 40CM line and only the
+   * templates agree.
+   */
+  groupLines: { itemCode: string | null; variety: string | null; orderLength: string | null }[];
 }
 
 /**

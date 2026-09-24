@@ -26,6 +26,30 @@ export function orderLengthFromItemCode(itemCode: string | null | undefined): st
 }
 
 /** `"50CM"` → 50. `"50 cm"` → 50. Anything without digits → null. */
+/**
+ * The VARIETY half of an order line's item_code — "FUSCHIANA-40CM" -> "FUSCHIANA".
+ *
+ * Sales Order lines carry the Item VARIANT, length and all. OPL `item_locations`
+ * carry the TEMPLATE. Matching a scanned bunch against a mix group therefore has
+ * to compare templates, or a legitimate 60CM bunch would be refused against a
+ * 40CM line purely because the strings differ — the exact case Rule 3 is meant
+ * to ALLOW, since longer stems are cut down.
+ *
+ * The suffix is only stripped when it actually parses as a length. "Odd-Name"
+ * keeps its whole code rather than becoming "Odd", which is the failure the Box
+ * Label work hit server-side (RESTYLE_PLAN.md §8.3).
+ */
+export function varietyFromItemCode(itemCode: string | null | undefined): string | null {
+    if (!itemCode) return null;
+    const code = itemCode.trim();
+    if (code.length === 0) return null;
+    const at = code.lastIndexOf('-');
+    if (at < 0) return code;
+    if (parseLengthCm(code.slice(at + 1)) === null) return code;
+    const base = code.slice(0, at).trim();
+    return base.length > 0 ? base : code;
+}
+
 export function parseLengthCm(text: string | null | undefined): number | null {
     if (!text) return null;
     const match = /(\d+)/.exec(String(text));

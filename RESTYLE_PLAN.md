@@ -17,7 +17,9 @@ These are not preferences. Breaking any of them costs a rebuild or a production 
 1. **Icons stay lucide.** Packhouse is `@expo/vector-icons` (Ionicons) throughout, including a `ROUTE_ICONS: Record<DrawerItem['route'], IconName>` map in `SideMenu.tsx`. Port the components, remap every icon to `lucide-react-native`. Do not add `@expo/vector-icons` to `package.json`.
 2. **Copy forward only.** We are three minor SDKs ahead of the reference. No dependency gets pinned down to match packhouse's versions. If a packhouse component uses an API that moved in RN 0.85, fix forward.
 3. **Do not touch the data or auth layer.** Keep react-query and the SecureStore session-cookie client in `src/lib/api.ts`. Do not import packhouse's `src/core/api/client.ts` or `src/core/auth/*` — it is AsyncStorage + zustand repository and would be a regression. Both apps are session-cookie auth, so there is no contract difference to reconcile.
-4. **Never import packhouse's `src/core/tenant/instance-mapper.ts`.** It maps Xflora to `xflora.fsn.frappe.cloud` — the internal Frappe Cloud hostname that produced `Failed host lookup` DNS errors on mobile networks. This app stays pinned to `https://xflora.upande.com`.
+4. ~~**Never import packhouse's `src/core/tenant/instance-mapper.ts`.** … This app stays pinned to `https://xflora.upande.com`.~~ **SUPERSEDED — the app is no longer single-site.** The site is **chosen at login** (`1936ffa`), entered addresses are parsed and allowlisted (`107e1a4`), `fsn.frappe.cloud` is accepted as a second apex (`6f3b491`), and every persisted key is namespaced by tenant with legacy installs migrated (`cf9347e`). **Treat the current code as truth, not this constraint.**
+
+   What survives is the narrower lesson that produced it: **do not reintroduce a static tenant→host table.** The original failure was `instance-mapper.ts` silently rewriting Xflora to an internal Frappe Cloud hostname that did not resolve on mobile networks. A host the user supplies, parsed and allowlisted, is a different mechanism and does not carry that risk.
 5. **Do not adopt packhouse's tenant machinery** (`src/core/tenant/*`, `src/composition/drawer-resolver.ts`, `RequireStation.tsx`). This is a single-tenant app; `src/features/navigation/drawerItems.ts` is already the single source of truth for nav.
 6. **Everything below is OTA-shippable.** No new native modules are introduced. Ship via `eas update`, not a new APK. If a phase ever adds a native dep, stop and flag it.
 
@@ -171,7 +173,7 @@ Two corrections to what this section originally said:
 
 ## 8. Phase 6 — Grading and Packing
 
-**Backend status on `xflora.upande.com`:** **Grading is built and verified** (§8.2). **Packing has no backend blockers** — the summary-field corruption, the `item_code` variant/template mismatch and the `uom` match dimension were all fixed live on 2026-08-20, and the screen is built (§8.3). Dispatch is unscoped rather than blocked (§8.4).
+**Backend status on `xflora.upande.com`:** **Grading is built and verified** (§8.2). **Packing has no backend blockers** — the summary-field corruption, the `item_code` variant/template mismatch and the `uom` match dimension were all fixed live on 2026-08-20, and the screen is built (§8.3). **Dispatch is built and verified end to end** (§8.4), and **traceability with it** (§8.6).
 
 ### 8.0 Source split — read this first
 
@@ -194,7 +196,7 @@ Two repos and one live site. Conflating them is how Kikwetu's and Karen's busine
 | `mobile_grading_entry` | ✅ present |
 | `get_bucket_details` | ✅ present |
 | `get_sales_order_lines` | ✅ present |
-| `createDispatchEntry` | ✅ present — **contradicts §8.4, see there** |
+| `createDispatchEntry` | ⛔ **DELETED since.** It was Karen's. Dispatch is now app code, not a Server Script — §8.4 |
 | `add_bunch_to_box` | ❌ **absent** — confirms §8.3's deletion of the box model |
 
 **Script bodies are NOT confirmed live.** Every `script` field quoted in §8.2 and §8.3 was read from a bench console backed by a **local snapshot last synced ~27 July 2026**. The endpoints are real; their current implementations are inferred from a copy that is months stale and may have drifted.
@@ -212,6 +214,32 @@ Three behaviours the correctness rules depend on are therefore **snapshot-source
 **Confirm all three with one authenticated call each before the packing screen is trusted in the field.** A single successful pack against a live OPL settles the envelope; a deliberately ungraded bunch settles Rule 2; a deliberate wrong-variety scan settles Rule 3. That is three scans, and it is the difference between a spec and a guess.
 
 Note the same caveat applies retroactively to **§8.2's flat-envelope finding, which is already in shipped code** — see the tag there.
+
+### ⛔ Frappe was UPGRADED — `frappe.request.get_json` no longer exists in Server Scripts
+
+**Calling it raises `'NoneType' object is not callable`.** The attribute is gone, so the failure is on the *lookup*, not the parse — `silent=True` does not help, and neither does guarding the result, because the call itself never returns.
+
+**Everything was migrated to `frappe.form_dict or {}`**, `createOrUpdateFarmPackList` included. §8.3's contract text is corrected accordingly.
+
+**🔴 `form_dict` yields STRINGS where `get_json` gave typed values.** Every numeric comparison in a migrated script is suspect until checked. For packing this lands directly on the payload: `bunch_qty` and `box_id` arrive as `"1"`, and the script's own `int(box_id)` and `row.bunch_qty + vals["bunch_qty"]` are where it would surface — as a silent string concatenation rather than an increment. **Add it to the first-live-session checks** alongside the three 🟡 behaviours above: one successful pack whose `bunch_qty` goes to `2` rather than `"11"` settles it.
+
+**Two scripts still call it, and therefore fail on every request.** Verified live 2026-09-24:
+
+| Script | `api_method` | Owner | State |
+|---|---|---|---|
+| `Receiving Out API` | `receiving_out_entry` | Administrator | `data = frappe.request.get_json(silent=True)` on the first line of its outer `try`. The raise is caught by its own `except` and returned as **HTTP 500 with the error text — on every call.** `allow_guest = 1`. **Not one of Rose's**: last modified 2026-07-07, before the migration, so it looks simply missed. |
+| `QC App Receiving Entry API` | `qc_app_receiving_entry` | rose@upande.com | Rose's, deliberately reverted to her original at her request. Throws until she fixes it. |
+
+**Three scripts that were believed broken are in fact already migrated** — recorded so the next session does not chase them:
+
+| Script | Owner | State |
+|---|---|---|
+| `Create Discard Entry` | judah@upande.com | migrated to `form_dict` |
+| `qc_traceability_history` | rose@upande.com | migrated |
+| `reject_bucket_qc` | esperance@upande.com | migrated |
+| `qc_discard_entry` | rose@upande.com | migrated — **and it mentions `get_json` only in a comment** explaining why it was abandoned |
+
+**⚠️ Method note, because it is exactly how that list went wrong.** Searching script bodies for `get_json` matches **comments**, and `qc_discard_entry` carries a long one. Filter on the assignment instead — `script LIKE '%= frappe.request.get_json%'` — to find live calls. A plain substring search over-reports, and the over-report looks identical to a real finding.
 
 ### ⚠️ The legacy repo is NOT authoritative for Xflora
 
@@ -404,7 +432,7 @@ Note the reversal: §8.3 previously deleted `createOrUpdateFarmPackList` as "Kar
 
 #### The real contract
 
-`POST /api/method/createOrUpdateFarmPackList` — Server Script `Create Or Update Farm Pack List`, module `Upande Harvest`, enabled. Requires `Content-Type: application/json`; the script reads `frappe.request.get_json()`.
+`POST /api/method/createOrUpdateFarmPackList` — Server Script `Create Or Update Farm Pack List`, module `Upande Harvest`, enabled. **The script now reads `frappe.form_dict or {}`** — `frappe.request.get_json` no longer exists after the Frappe upgrade (§8.0). Keep sending `Content-Type: application/json`; Frappe still populates `form_dict` from a JSON body. **Watch the types**: see the 🔴 strings note in §8.0, which lands squarely on `bunch_qty` and `box_id` here.
 
 ```
 {
@@ -1042,21 +1070,46 @@ Rule 3 is already correct for this case: it is expressed as a membership test ov
 - The OPL must have `item_locations`, or the call throws `Order Pick List has no location entries defined`.
 - The Farm Pack List is `submit()`ed on creation and thereafter updated with `ignore_validate_update_after_submit`, with `status` forced to `Completed` on every write. Expect no draft state.
 
-### 8.4 Dispatch — UNSCOPED, not blocked. This section's premise was wrong.
+### 8.4 Dispatch — ✅ BUILT AND VERIFIED END TO END. This section was wrong twice.
 
-**Correction: `createDispatchEntry` IS present on Xflora — confirmed live** (§8.0). This section previously said "No endpoints on Xflora. Placeholder only" and called the endpoint "Karen-only". Both are false. A `Dispatch Entry` Server Script exists and is enabled.
+**Dispatch is app code in `upande_harvest`, not a Server Script.** The doctypes landed in `08e3802` (`Dispatch Session`, `Dispatch Session Box`); the API is `upande_harvest/upande_harvest/doctype/dispatch_session/dispatch_session.py`:
 
-So dispatch is not backend-blocked in the way §8.4 claimed. What is actually missing is **scoping**: nobody has said what the Xflora dispatch flow should do, and no one has read the script body.
+| Function | Role |
+|---|---|
+| `open_session(truck_reg, driver_name, dispatch_date=None)` | opens a truck's session |
+| `scan_box(session, box_label)` | adds a `Box Label` to it |
+| `remove_box(session, box_label)` | takes one off again |
+| `close_session(session)` | closes it **and raises the Delivery Notes** |
+| `get_session(session)` | current state |
+| `get_manifest(delivery_date=None)` | the day's manifest |
 
-Before designing anything: read `Dispatch Entry`'s `script` field for the real payload, and check whether `fetchDispatchTrucks` (or any truck-listing equivalent) exists live — it was never probed. Note that `Sales Order Item` carries a `custom_truck` field, which suggests trucks are modelled somewhere.
+#### ⛔ Delivery Notes are raised ON CLOSE, one per Sales Order — never on a completing scan
 
-**The original warning still stands and is the reason this stays unbuilt:** do not design against packhouse's dispatch flow. That would bake Karen's model into Xflora before anyone has decided what Xflora needs. The blocker is a product decision, not a missing endpoint.
+This is the load-bearing design decision, and the reason is in the module's own docstring: each note covers exactly the boxes **that truck** carried, so an order split across two trucks produces **one note per truck** and ERPNext accumulates `per_delivered` across both. Raising on the scan that completes an order would have to guess the split before the truck is finished.
+
+`close_session` raises the notes **before** submitting the session, so their names are on the document. Note-raising **cannot throw**: failures come back as `delivery_note_errors` in the response and the session still closes, because the boxes left the building either way. What comes back is the list a human has to finish — `{status, session, total_boxes, orders_completed, delivery_notes, delivery_note_errors, message}`.
+
+#### `createDispatchEntry` is DELETED
+
+It was Karen's. §8.0's table row is corrected. Anything in an older draft treating it as the Xflora contract is void — including the instruction to "read `Dispatch Entry`'s `script` field", which no longer exists to read.
+
+#### The standing warning is discharged, not merely still standing
+
+This section twice said dispatch was blocked or unscoped, and twice warned against designing from packhouse's flow lest Karen's model get baked in. **Xflora's model is now decided and implemented**: truck sessions with per-box scanning against `Box Label`. That is precisely what the per-box QR change (§8.3) was for — before it, every box on a pack list carried the same code and could not be told apart when scanned.
 
 ### 8.5 Navigation
 
 **Grading is done** — `{ label: 'Grading', icon: Hexagon, route: '/grading' }` in `WORKFLOW_ITEMS`, registered `href: null` in `(app)/_layout.tsx`, so it is drawer-and-quick-action only. The tab bar is full at five; promoting Grading onto it means demoting something else, which is an open call.
 
 **Packing** takes the same treatment when built: drawer entry plus `href: null`. Both are tab-or-drawer destinations, so neither takes `onBack` (§5).
+
+### 8.6 Traceability — ✅ BUILT
+
+`get_traceability_history` resolves a scanned id's history and accepts **all three levels — bunch, bucket and box.**
+
+It is a **Server Script on the site**, not app code in `upande_harvest`, so §8.0's provenance rules apply to it like any other script: its body is read from a bench, and which bench matters.
+
+This is the other thing the per-box QR change (§8.3) unlocked. A box-level history is only meaningful once each box has its own code; before that change all boxes on a pack list shared one, and `File.save_file`'s content-hash dedupe collapsed them onto a single PNG.
 
 ## 9. Phase 7 — ship
 
@@ -1092,4 +1145,8 @@ The closure trigger is **resolved**: the client sends `close_box` on the filling
 
 **Confidence is split, and the split matters** (§8.0): endpoint *existence* is confirmed live, but every script *body* comes from a bench snapshot ~27 July 2026. Three snapshot-sourced behaviours carry the correctness rules and are tagged 🟡 at their use sites. They cost three deliberate scans to confirm — a successful pack, an ungraded bunch, a wrong-variety bunch — and that should happen on the first live packing session rather than after it.
 
-**Dispatch is unscoped, not blocked** — `createDispatchEntry` exists live, contrary to what §8.4 previously claimed. What is missing is a product decision about what Xflora dispatch should do, plus a read of the script body.
+**Dispatch is BUILT and verified end to end** (§8.4) — `Dispatch Session` + `Dispatch Session Box` in `upande_harvest` (`08e3802`), with Delivery Notes raised **on session close, one per Sales Order**, covering only the boxes that truck carried. `createDispatchEntry` was Karen's and has been **deleted**. **Traceability is built too** (§8.6): `get_traceability_history` over bunch, bucket and box.
+
+**A Frappe upgrade removed `frappe.request.get_json` from Server Scripts** (§8.0). Everything was migrated to `frappe.form_dict or {}` except **`Receiving Out API`** and **`QC App Receiving Entry API`**, which fail on every call until fixed. `form_dict` yields **strings**, so every numeric comparison in a migrated script is suspect until checked — `bunch_qty` and `box_id` in the packing payload most of all.
+
+**The app is no longer pinned to one site** — constraint 4 is superseded; the site is chosen at login.

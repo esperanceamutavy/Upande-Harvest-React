@@ -2,7 +2,8 @@ import { useMutation } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
 import { resolveCustomerCodeRef, toCustomerCodeRef } from './customerCodeRef';
-import { orderLengthFromItemCode } from './lengths';
+import { orderLengthFromItemCode, varietyFromItemCode } from './lengths';
+import { mixedStemsPerBox, resolveGroupLines } from './mixGroup';
 import { resolveTargetUnits } from './targets';
 import type { SalesOrderTargets } from '../../types/packing';
 
@@ -56,13 +57,17 @@ async function fetchSalesOrderTargets({
   const items = Array.isArray(doc.items) ? (doc.items as Record<string, unknown>[]) : [];
   if (items.length === 0) throw new Error(`Sales Order ${salesOrder} has no line items`);
 
-  // A mix puts SEVERAL lines on ONE OPL, so collect them all. Straight boxes
-  // can too (OPL-2026-03432 has three Madam Red lines at different lengths),
-  // which is why the branch below keys on custom_mixed_box, not on count.
-  const oplRows = items.filter(
-    (r) => r.custom_opl != null && String(r.custom_opl) === oplName,
-  );
-  const rows = oplRows.length > 0 ? oplRows : items.length === 1 ? [items[0]] : [];
+  // A mix puts SEVERAL lines on ONE OPL, so collect them all — and for a mix the
+  // set CANNOT be read off custom_opl, because the allocator does not write it
+  // to every line. Nine of Milele's ten lines carry OPL-2026-05334 and
+  // FUSCHIANA-40CM carries null; matching on the link drops it silently. The
+  // group is the real membership. See mixGroup.ts.
+  //
+  // Straight boxes still match on custom_opl, including the several-lines case
+  // (OPL-2026-03432 has three Madam Red lines at different lengths).
+  const resolved = resolveGroupLines(items, oplName);
+  const rows =
+    resolved.rows.length > 0 ? resolved.rows : items.length === 1 ? [items[0]] : [];
 
   if (rows.length === 0)
     throw new Error(`No Sales Order line on ${salesOrder} points at ${oplName}`);
@@ -70,7 +75,7 @@ async function fetchSalesOrderTargets({
   // Identity fields come off the first line — order-level in practice, and
   // identical across a mix group.
   const row = rows[0];
-  const isMixed = rows.some((r) => Number(r.custom_mixed_box ?? 0) === 1);
+  const isMixed = resolved.mode !== 'straight';
 
   // `custom_customer_code` is a LINK: the stored value is a Customer Code record
   // NAME and the code that goes on the box is that record's `code`. They diverge
@@ -110,10 +115,10 @@ async function fetchSalesOrderTargets({
   let qty: number;
 
   if (isMixed) {
-    const stemsPerBox = rows.reduce(
-      (sum, r) => sum + Number(r.custom_packrate_mixed_box ?? 0),
-      0,
-    );
+    // Summed across the GROUP, not across the linked lines — that difference is
+    // the whole fix. Milele reads 500 (10 x 50) where the link-based set read
+    // 450, because FUSCHIANA's 50 was being dropped with its row.
+    const stemsPerBox = mixedStemsPerBox(rows);
     packRate = soIsBunchUom ? stemsPerBox / conversionFactor : stemsPerBox;
     qty = rows.reduce((sum, r) => sum + Number(r.qty ?? 0), 0);
   } else {
@@ -191,6 +196,19 @@ async function fetchSalesOrderTargets({
     // Used directly rather than derived — it is already correct on the SO and
     // taking it avoids inventing a rounding rule for the trailing box.
     boxCount: boxCount > 0 ? boxCount : 1,
+    packMode: resolved.mode,
+    // Every variety in the group, for the screen to LIST and for Rule 3 to match
+    // against. `item_locations` cannot serve either job on a mix: an unallocated
+    // variety has no row there, so it would be invisible and unscannable.
+    //
+    // `variety` is the TEMPLATE. Lines carry the variant ("FUSCHIANA-40CM"); a
+    // legitimate 60CM bunch resolves to the template "FUSCHIANA" and would fail
+    // a variant-to-variant string match. Length is Rule 3's own comparison.
+    groupLines: rows.map((r) => ({
+      itemCode: _text(r.item_code),
+      variety: varietyFromItemCode(_text(r.item_code)),
+      orderLength: orderLengthFromItemCode(_text(r.item_code)),
+    })),
   };
 }
 

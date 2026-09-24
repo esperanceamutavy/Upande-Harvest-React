@@ -354,12 +354,35 @@ export default function PackingScreen() {
    * The proper fix is server-side: match on variety and length-or-longer there
    * too. See RESTYLE_PLAN.md §8.3.
    */
+  /**
+   * What Rule 3 matches VARIETY against.
+   *
+   * A straight box matches `item_locations`, unchanged. A MIX cannot: the
+   * allocator does not write `custom_opl` to every line, so a variety it never
+   * reached has no row there and a perfectly good bunch would be refused. The
+   * group is the order's own statement of what belongs in the box, so that is
+   * the membership set — see mixGroup.ts.
+   *
+   * Group lines are reduced to the TEMPLATE. They carry the variant
+   * ("FUSCHIANA-40CM"), and a 60CM bunch — valid, because longer stems are cut
+   * down — resolves to "FUSCHIANA". Comparing variants would reject it on a
+   * string difference that Rule 3 exists to permit.
+   */
+  function varietyRowsFor(s: PackingSession): { itemCode: string }[] {
+    if (s.targets.packMode === 'straight') return s.opl.rows;
+    const varieties = s.targets.groupLines
+      .map((l) => l.variety)
+      .filter((v): v is string => v !== null && v.length > 0);
+    // Fall back rather than match against nothing, which would reject every scan.
+    return varieties.length > 0 ? varieties.map((itemCode) => ({ itemCode })) : s.opl.rows;
+  }
+
   function validateAgainstOpl(s: PackingSession, bunch: BunchDetails): PackRejection | null {
     // MONO matches on its one variety; a BOUQUET has to have EVERY component on
     // the pick list. Its item_code names only the first of several, so matching
     // on that alone would wave through a bouquet whose other varieties belong to
     // a different order. See bunchMatch.ts.
-    if (matchBunchToOpl(bunch, s.opl.rows) !== null) return 'variety-mismatch';
+    if (matchBunchToOpl(bunch, varietyRowsFor(s)) !== null) return 'variety-mismatch';
 
     // A bouquet is governed by its SHORTEST component: a 40CM stem in a 50CM
     // order is short however long the rest are.
@@ -420,7 +443,7 @@ export default function PackingScreen() {
           bunchId,
           mismatch,
           bunch.isMixedBunch
-            ? `${bunch.bunchName ?? 'That bouquet'} does not belong on ${s.opl.name} — ${(matchBunchToOpl(bunch, s.opl.rows)?.missing ?? []).join(', ')} ${(matchBunchToOpl(bunch, s.opl.rows)?.missing ?? []).length === 1 ? 'is' : 'are'} not on this pick list.`
+            ? `${bunch.bunchName ?? 'That bouquet'} does not belong on ${s.opl.name} — ${(matchBunchToOpl(bunch, varietyRowsFor(s))?.missing ?? []).join(', ')} ${(matchBunchToOpl(bunch, varietyRowsFor(s))?.missing ?? []).length === 1 ? 'is' : 'are'} not on this pick list.`
             : `${bunch.itemCode} is not on ${s.opl.name}. Packing it would send stock to the wrong warehouse.`,
         );
         return;
@@ -711,7 +734,31 @@ export default function PackingScreen() {
 
       <Card title="Items">
         <View style={styles.list}>
-          {session.opl.rows.map((row, idx) => (
+          {/* A MIX lists the GROUP, plainly and in full — every variety the order
+              asks for, whether or not the allocator reached it. No warning, no
+              greying out, no allocated-vs-ordered: a packer scans what is in
+              front of them, and whether allocation ran is not their problem.
+              Shelf is unknown for an unallocated line, so the row simply omits
+              it rather than saying anything about why. */}
+          {session.targets.packMode !== 'straight'
+            ? session.targets.groupLines.map((line, idx) => {
+                const shelf = session.opl.rows.find(
+                  (r) => r.itemCode === line.variety || r.itemCode === line.itemCode,
+                )?.shelf;
+                return (
+                  <View key={`${line.itemCode}-${idx}`} style={styles.itemRow}>
+                    <Text style={styles.itemTitle} numberOfLines={1}>
+                      {line.variety ?? line.itemCode} · {line.orderLength ?? '—'}
+                    </Text>
+                    {shelf ? (
+                      <Text style={styles.itemMeta} numberOfLines={1}>
+                        shelf {shelf}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })
+            : session.opl.rows.map((row, idx) => (
             <View key={`${row.itemCode}-${row.stemLength}-${idx}`} style={styles.itemRow}>
               <Text style={styles.itemTitle} numberOfLines={1}>
                 {row.itemCode} · {row.stemLength}
@@ -725,7 +772,7 @@ export default function PackingScreen() {
                 {row.shelf ? ` · shelf ${row.shelf}` : ''}
               </Text>
             </View>
-          ))}
+              ))}
         </View>
       </Card>
 
@@ -749,7 +796,14 @@ export default function PackingScreen() {
               Bunch(12): a wrong-size bunch passes both Rule 1 and Rule 3 today
               — the unguarded gap recorded in §8.3. */}
           <DetailRow label="Bunch size" value={session.opl.rows[0]?.uom ?? '—'} />
-          <DetailRow label="Variety" value={session.opl.rows[0]?.itemCode ?? '—'} />
+          <DetailRow
+            label="Variety"
+            value={
+              session.targets.packMode !== 'straight'
+                ? `${session.targets.groupLines.length} varieties`
+                : (session.opl.rows[0]?.itemCode ?? '—')
+            }
+          />
           <DetailRow label="Lengths" value={lengths || '—'} />
         </View>
       </Card>
