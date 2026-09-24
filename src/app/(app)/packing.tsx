@@ -18,6 +18,7 @@ import { formatBoxRanges, resumePlan } from '../../features/packing/resume';
 import { compareLength, displayLength } from '../../features/packing/lengths';
 import { effectiveStemLength, matchBunchToOpl } from '../../features/packing/bunchMatch';
 import { filterOpls } from '../../features/packing/oplSearch';
+import { lengthFloorFor, substitutesForLine } from '../../features/packing/substitutes';
 import { parseStemsPerBunch } from '../../features/packing/targets';
 import { useBunchDetails } from '../../features/packing/useBunchDetails';
 import {
@@ -377,16 +378,47 @@ export default function PackingScreen() {
     return varieties.length > 0 ? varieties.map((itemCode) => ({ itemCode })) : s.opl.rows;
   }
 
+  /**
+   * Rule 3's variety set, WIDENED by whatever the order permits as a substitute.
+   *
+   * A substitution is a permission the order granted, so it belongs in the same
+   * membership test rather than in a branch beside it — which also handles a
+   * BOUQUET for free: every component must still be permitted, and a component
+   * may now be permitted by substitution.
+   *
+   * Length is not decided here; it is measured against the line the substitute
+   * stands in for. See lengthFloorFor.
+   */
+  function acceptedVarietyRows(s: PackingSession): { itemCode: string }[] {
+    const base = varietyRowsFor(s);
+    if (s.targets.substitutes.length === 0) return base;
+    return [...base, ...s.targets.substitutes.map((sub) => ({ itemCode: sub.varietyBase }))];
+  }
+
+  /** The floor this particular bunch must clear — its own line's, or the line
+   *  it substitutes for. */
+  function floorFor(s: PackingSession, bunch: BunchDetails): string | null {
+    return lengthFloorFor({
+      bunchVariety: bunch.variantParent || bunch.itemCode,
+      orderVarieties: s.targets.groupLines.map((l) => l.variety),
+      substitutes: s.targets.substitutes,
+      orderLength: s.targets.orderLength,
+    });
+  }
+
   function validateAgainstOpl(s: PackingSession, bunch: BunchDetails): PackRejection | null {
     // MONO matches on its one variety; a BOUQUET has to have EVERY component on
     // the pick list. Its item_code names only the first of several, so matching
     // on that alone would wave through a bouquet whose other varieties belong to
     // a different order. See bunchMatch.ts.
-    if (matchBunchToOpl(bunch, varietyRowsFor(s)) !== null) return 'variety-mismatch';
+    if (matchBunchToOpl(bunch, acceptedVarietyRows(s)) !== null) return 'variety-mismatch';
 
     // A bouquet is governed by its SHORTEST component: a 40CM stem in a 50CM
     // order is short however long the rest are.
-    const verdict = compareLength(effectiveStemLength(bunch, compareLength), s.targets.orderLength);
+    // A variety ON the order keeps the order's own length, unchanged. One
+    // reachable only by substitution is measured against the line it stands in
+    // for: a substitute listed against Adalonia-40CM admits 40CM or longer.
+    const verdict = compareLength(effectiveStemLength(bunch, compareLength), floorFor(s, bunch));
     if (verdict === 'shorter') return 'length-mismatch';
     if (verdict === 'unknown') {
       // Allowed on purpose — a format surprise must not stop a packer.
@@ -443,7 +475,7 @@ export default function PackingScreen() {
           bunchId,
           mismatch,
           bunch.isMixedBunch
-            ? `${bunch.bunchName ?? 'That bouquet'} does not belong on ${s.opl.name} — ${(matchBunchToOpl(bunch, varietyRowsFor(s))?.missing ?? []).join(', ')} ${(matchBunchToOpl(bunch, varietyRowsFor(s))?.missing ?? []).length === 1 ? 'is' : 'are'} not on this pick list.`
+            ? `${bunch.bunchName ?? 'That bouquet'} does not belong on ${s.opl.name} — ${(matchBunchToOpl(bunch, acceptedVarietyRows(s))?.missing ?? []).join(', ')} ${(matchBunchToOpl(bunch, acceptedVarietyRows(s))?.missing ?? []).length === 1 ? 'is' : 'are'} not on this pick list.`
             : `${bunch.itemCode} is not on ${s.opl.name}. Packing it would send stock to the wrong warehouse.`,
         );
         return;
@@ -452,7 +484,7 @@ export default function PackingScreen() {
         reject(
           bunchId,
           mismatch,
-          `${bunch.stemLength} is shorter than this order's ${s.targets.orderLength}. Pick ${s.targets.orderLength} or longer.`,
+          `${bunch.stemLength} is shorter than the ${floorFor(s, bunch)} line it would fill. Pick ${floorFor(s, bunch)} or longer.`,
         );
         return;
       }
@@ -745,6 +777,10 @@ export default function PackingScreen() {
                 const shelf = session.opl.rows.find(
                   (r) => r.itemCode === line.variety || r.itemCode === line.itemCode,
                 )?.shelf;
+                const subs = substitutesForLine(session.targets.substitutes, {
+                  variety: line.variety,
+                  length: line.orderLength,
+                });
                 return (
                   <View key={`${line.itemCode}-${idx}`} style={styles.itemRow}>
                     <Text style={styles.itemTitle} numberOfLines={1}>
@@ -753,6 +789,14 @@ export default function PackingScreen() {
                     {shelf ? (
                       <Text style={styles.itemMeta} numberOfLines={1}>
                         shelf {shelf}
+                      </Text>
+                    ) : null}
+                    {/* A PERMISSION, NOT AN EXCEPTION. Same muted style as the
+                        shelf line — no warning tone, no emphasis. The order said
+                        these are acceptable, so they read as ordinary. */}
+                    {subs.length > 0 ? (
+                      <Text style={styles.itemMeta} numberOfLines={2}>
+                        or {subs.join(', ')}
                       </Text>
                     ) : null}
                   </View>
@@ -771,6 +815,19 @@ export default function PackingScreen() {
                 {row.uom}
                 {row.shelf ? ` · shelf ${row.shelf}` : ''}
               </Text>
+              {/* See the mixed branch above — quiet on purpose. */}
+              {substitutesForLine(session.targets.substitutes, {
+                variety: row.itemCode,
+                length: row.stemLength,
+              }).length > 0 ? (
+                <Text style={styles.itemMeta} numberOfLines={2}>
+                  or{' '}
+                  {substitutesForLine(session.targets.substitutes, {
+                    variety: row.itemCode,
+                    length: row.stemLength,
+                  }).join(', ')}
+                </Text>
+              ) : null}
             </View>
               ))}
         </View>

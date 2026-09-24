@@ -4,6 +4,7 @@ import { apiClient } from '../../lib/api';
 import { resolveCustomerCodeRef, toCustomerCodeRef } from './customerCodeRef';
 import { orderLengthFromItemCode, varietyFromItemCode } from './lengths';
 import { mixedStemsPerBox, resolveGroupLines } from './mixGroup';
+import { permittedSubstitutes } from './substitutes.ts';
 import { resolveTargetUnits } from './targets';
 import type { SalesOrderTargets } from '../../types/packing';
 
@@ -209,6 +210,15 @@ async function fetchSalesOrderTargets({
       variety: varietyFromItemCode(_text(r.item_code)),
       orderLength: orderLengthFromItemCode(_text(r.item_code)),
     })),
+    // NO NEW REQUEST. custom_substitutes rides along on the Sales Order read
+    // this function already makes for the targets. Scoped to the lines of THIS
+    // pick list, since one order routinely spans several — see substitutes.ts.
+    substitutes: permittedSubstitutes(
+      Array.isArray(doc.custom_substitutes)
+        ? (doc.custom_substitutes as Record<string, unknown>[])
+        : [],
+      rows.map((r) => _text(r.item_code)),
+    ),
   };
 }
 

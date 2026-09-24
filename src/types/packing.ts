@@ -2,6 +2,7 @@ import type { PackrateBasis } from '../features/packing/packrate.ts';
 
 import type { ResumeState } from '../features/packing/resume';
 import type { PackMode } from '../features/packing/mixGroup';
+import type { PermittedSubstitute } from '../features/packing/substitutes.ts';
 
 // Packing contract — confirmed against the live Server Script and live OPL
 // documents on xflora.upande.com. RESTYLE_PLAN.md §8.3.
@@ -206,6 +207,17 @@ export interface SalesOrderTargets {
    * templates agree.
    */
   groupLines: { itemCode: string | null; variety: string | null; orderLength: string | null }[];
+
+  /**
+   * Varieties this order permits in place of one of its own lines, already
+   * scoped to lines on THIS pick list.
+   *
+   * Rule 3 widens to accept them; nothing else changes. A substitute consumes
+   * the line it stands in for, so the cap, box count and order total are
+   * untouched. Empty on an order that permits none, which is the common case
+   * and takes exactly the path it always did.
+   */
+  substitutes: PermittedSubstitute[];
 }
 
 /**
