@@ -69,6 +69,22 @@ async function fetchSalesOrderTargets({
   // Straight boxes still match on custom_opl, including the several-lines case
   // (OPL-2026-03432 has three Madam Red lines at different lengths).
   const resolved = resolveGroupLines(items, oplName);
+
+  // BOTH OF THESE ARE ALLOCATOR FAULTS, surfaced rather than silently absorbed.
+  // Packing recovers, but the link is still missing and someone should fix it.
+  if (resolved.ambiguous) {
+    console.warn(
+      `[packing] ${oplName}: no Sales Order line carries this OPL, and ${salesOrder} ` +
+        `holds more than one group — REFUSING to guess which. Falling back to the ` +
+        `linked lines, which is empty, so the screen will show the allocation only.`,
+    );
+  } else if (resolved.viaOrder) {
+    console.warn(
+      `[packing] ${oplName}: no Sales Order line carries this OPL. Group resolved ` +
+        `from ${salesOrder} instead (${resolved.groupField} ${resolved.groupValue}, ` +
+        `${resolved.rows.length} lines). The allocator did not write custom_opl.`,
+    );
+  }
   const rows =
     resolved.rows.length > 0 ? resolved.rows : items.length === 1 ? [items[0]] : [];
 

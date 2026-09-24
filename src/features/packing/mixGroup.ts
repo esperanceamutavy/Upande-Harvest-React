@@ -63,6 +63,19 @@ export interface ResolvedGroup<T> {
     groupField: 'custom_mix_group' | 'custom_bunch_group' | null;
     /** The group id, as text. Null for a straight box. */
     groupValue: string | null;
+    /**
+     * True when the group was resolved from the SALES ORDER because no line
+     * carried this OPL at all — see `resolveGroupLines`. Worth surfacing: it
+     * means the allocator never wrote the link, which is a data fault even
+     * though packing recovers from it.
+     */
+    viaOrder?: boolean;
+    /**
+     * True when the order-level fallback DECLINED to guess because the order
+     * holds more than one group. Nothing is resolved; the caller keeps today's
+     * behaviour and should log.
+     */
+    ambiguous?: boolean;
 }
 
 /** Frappe sends checkboxes as 0/1 and sometimes as "0"/"1". */
@@ -92,6 +105,19 @@ export function resolveGroupLines<T extends GroupableLine>(
     // The seed's only job is to reveal the group, so any linked line will do.
     const seed = linked.find((r) => isSet(r.custom_mixed_bunch) || isSet(r.custom_mixed_box));
     if (!seed) {
+        // NO LINE CARRIES THIS OPL AT ALL. On a bouquet order the allocator can
+        // leave custom_opl null on EVERY line, and then the seed step has
+        // nothing to read a group from. Falling through would hand back an empty
+        // set, the screen would fall back to the allocation, and a bought-in
+        // component that is never allocated — Lepidium/Limonium — would be
+        // missing and unscannable.
+        //
+        // So ask the ORDER instead. A bouquet order is one group per OPL in the
+        // live data, which is what makes this safe.
+        if (linked.length === 0) {
+            const fallback = resolveFromOrder(items);
+            if (fallback) return fallback;
+        }
         return { rows: linked, mode: 'straight', groupField: null, groupValue: null };
     }
 
@@ -114,6 +140,39 @@ export function resolveGroupLines<T extends GroupableLine>(
     });
 
     return { rows: rows.length > 0 ? rows : linked, mode, groupField, groupValue };
+}
+
+
+/**
+ * Resolve the group from the SALES ORDER, used only when no line carries the
+ * OPL. Bunch wins over box, matching the same precedence as the linked path.
+ *
+ * ⛔ IT REFUSES TO GUESS. If the order holds more than one distinct group, there
+ * is no way to tell which one this OPL is, and picking wrong would let a packer
+ * scan into the wrong box — a silent misallocation, the failure Rule 3 exists to
+ * prevent. Returning null keeps today's behaviour, which fails visibly instead.
+ */
+function resolveFromOrder<T extends GroupableLine>(items: T[]): ResolvedGroup<T> | null {
+    const pairs: [PackMode, 'custom_bunch_group' | 'custom_mix_group', (r: T) => boolean][] = [
+        ['bouquet', 'custom_bunch_group', (r) => isSet(r.custom_mixed_bunch)],
+        // A bouquet line is never also a mixed-box line, so box only considers
+        // rows that are not already claimed above.
+        ['mixed-box', 'custom_mix_group', (r) => !isSet(r.custom_mixed_bunch) && isSet(r.custom_mixed_box)],
+    ];
+
+    for (const [mode, groupField, isKind] of pairs) {
+        const rows = items.filter(isKind);
+        if (rows.length === 0) continue;
+
+        const groups = new Set(rows.map((r) => asKey(r[groupField])));
+        if (groups.size > 1) {
+            // Ambiguous — say so rather than pick one.
+            return { rows: [], mode: 'straight', groupField: null, groupValue: null, ambiguous: true };
+        }
+        const groupValue = [...groups][0] ?? null;
+        return { rows, mode, groupField, groupValue, viaOrder: true };
+    }
+    return null;
 }
 
 /**

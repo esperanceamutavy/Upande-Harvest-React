@@ -157,3 +157,84 @@ test('a code whose suffix is not a length keeps all of itself', () => {
     assert.equal(varietyFromItemCode('Odd-Name'), 'Odd-Name');
     assert.equal(varietyFromItemCode('Brinessa-50CM'), 'Brinessa');
 });
+
+// ── the order-level fallback ────────────────────────────────────────────────
+//
+// On a BOUQUET order the allocator can leave custom_opl null on every line, so
+// the seed step has nothing to read a group from. Four live orders are in that
+// state — SAL-ORD-2026-02332 is Lovana-50CM, Malibu Purple-50CM,
+// Royal Magic-50CM and Lepidium/Limonium-50CM, all four unlinked, one group.
+//
+// Lepidium/Limonium is bought in and never allocated, so it has no OPL row
+// either: without the group it is invisible and unscannable.
+
+function bouquetOrder(opl) {
+    return [
+        { item_code: 'Lovana-50CM', custom_opl: opl, custom_mixed_bunch: 1, custom_bunch_group: '1', custom_mixed_box: 0, custom_mix_group: 0, custom_packrate_mixed_box: 175 },
+        { item_code: 'Malibu Purple-50CM', custom_opl: null, custom_mixed_bunch: 1, custom_bunch_group: '1', custom_mixed_box: 0, custom_mix_group: 0, custom_packrate_mixed_box: 70 },
+        { item_code: 'Royal Magic-50CM', custom_opl: null, custom_mixed_bunch: 1, custom_bunch_group: '1', custom_mixed_box: 0, custom_mix_group: 0, custom_packrate_mixed_box: 105 },
+        { item_code: 'Lepidium/Limonium-50CM', custom_opl: null, custom_mixed_bunch: 1, custom_bunch_group: '1', custom_mixed_box: 0, custom_mix_group: 0, custom_packrate_mixed_box: 105 },
+    ];
+}
+
+test('no line carries the OPL: the group comes from the ORDER', () => {
+    const { rows, mode, groupField, groupValue, viaOrder } = resolveGroupLines(
+        bouquetOrder(null),
+        'OPL-2026-05970',
+    );
+    assert.equal(mode, 'bouquet');
+    assert.equal(groupField, 'custom_bunch_group');
+    assert.equal(groupValue, '1');
+    assert.equal(viaOrder, true, 'flagged, because the allocator did not write the link');
+    assert.deepEqual(rows.map((r) => r.item_code), [
+        'Lovana-50CM',
+        'Malibu Purple-50CM',
+        'Royal Magic-50CM',
+        'Lepidium/Limonium-50CM',
+    ]);
+});
+
+test('the bought-in component is in the set, and the group sums to the box target', () => {
+    const { rows } = resolveGroupLines(bouquetOrder(null), 'OPL-2026-05970');
+    assert.ok(rows.some((r) => r.item_code === 'Lepidium/Limonium-50CM'));
+    assert.equal(mixedStemsPerBox(rows), 455);
+});
+
+test('one linked line is enough — the fallback does not engage', () => {
+    const { rows, viaOrder } = resolveGroupLines(bouquetOrder('OPL-2026-05970'), 'OPL-2026-05970');
+    assert.equal(viaOrder, undefined, 'the normal seed path handled it');
+    assert.equal(rows.length, 4);
+});
+
+test('MORE THAN ONE group on the order: refuse to guess', () => {
+    const twoGroups = [
+        ...bouquetOrder(null),
+        { item_code: 'Orange Wave-50CM', custom_opl: null, custom_mixed_bunch: 1, custom_bunch_group: '2', custom_mixed_box: 0, custom_mix_group: 0, custom_packrate_mixed_box: 50 },
+    ];
+    const res = resolveGroupLines(twoGroups, 'OPL-2026-05970');
+    assert.equal(res.ambiguous, true);
+    assert.deepEqual(res.rows, [], 'nothing resolved — picking wrong would fill the wrong box');
+    assert.equal(res.mode, 'straight', "today's behaviour is kept");
+});
+
+test('mixed BOX orders fall back the same way, on custom_mix_group', () => {
+    const boxOrder = [
+        { item_code: 'A-40CM', custom_opl: null, custom_mixed_box: 1, custom_mix_group: '3', custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 50 },
+        { item_code: 'B-40CM', custom_opl: null, custom_mixed_box: 1, custom_mix_group: '3', custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 50 },
+    ];
+    const { rows, mode, groupField, viaOrder } = resolveGroupLines(boxOrder, 'OPL-X');
+    assert.equal(mode, 'mixed-box');
+    assert.equal(groupField, 'custom_mix_group');
+    assert.equal(viaOrder, true);
+    assert.equal(rows.length, 2);
+});
+
+test('a STRAIGHT order with no links is unchanged — no fallback, no guess', () => {
+    const straight = [
+        { item_code: 'Madam Red-50CM', custom_opl: null, custom_mixed_box: 0, custom_mix_group: 0, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate: 140 },
+    ];
+    const res = resolveGroupLines(straight, 'OPL-S');
+    assert.equal(res.mode, 'straight');
+    assert.equal(res.viaOrder, undefined);
+    assert.deepEqual(res.rows, []);
+});
