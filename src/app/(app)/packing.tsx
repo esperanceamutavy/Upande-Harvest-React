@@ -392,15 +392,17 @@ export default function PackingScreen() {
   function acceptedVarietyRows(s: PackingSession): { itemCode: string }[] {
     const base = varietyRowsFor(s);
     if (s.targets.substitutes.length === 0) return base;
-    return [...base, ...s.targets.substitutes.map((sub) => ({ itemCode: sub.varietyBase }))];
+    return [...base, ...s.targets.substitutes.map((sub) => ({ itemCode: sub.varietyTemplate }))];
   }
 
   /** The floor this particular bunch must clear — its own line's, or the line
    *  it substitutes for. */
   function floorFor(s: PackingSession, bunch: BunchDetails): string | null {
     return lengthFloorFor({
-      bunchVariety: bunch.variantParent || bunch.itemCode,
-      orderVarieties: s.targets.groupLines.map((l) => l.variety),
+      // variantParent is already the variant_of template, resolved by
+      // useBunchDetails — the same relation both sides of the table use.
+      bunchTemplate: bunch.variantParent || bunch.itemCode,
+      orderTemplates: s.targets.groupLines.map((l) => l.variety),
       substitutes: s.targets.substitutes,
       orderLength: s.targets.orderLength,
     });
@@ -778,7 +780,7 @@ export default function PackingScreen() {
                   (r) => r.itemCode === line.variety || r.itemCode === line.itemCode,
                 )?.shelf;
                 const subs = substitutesForLine(session.targets.substitutes, {
-                  variety: line.variety,
+                  template: line.variety,
                   length: line.orderLength,
                 });
                 return (
@@ -817,13 +819,13 @@ export default function PackingScreen() {
               </Text>
               {/* See the mixed branch above — quiet on purpose. */}
               {substitutesForLine(session.targets.substitutes, {
-                variety: row.itemCode,
+                template: row.itemCode,
                 length: row.stemLength,
               }).length > 0 ? (
                 <Text style={styles.itemMeta} numberOfLines={2}>
                   or{' '}
                   {substitutesForLine(session.targets.substitutes, {
-                    variety: row.itemCode,
+                    template: row.itemCode,
                     length: row.stemLength,
                   }).join(', ')}
                 </Text>

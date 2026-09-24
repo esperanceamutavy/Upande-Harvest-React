@@ -2,9 +2,11 @@ import { useMutation } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
 import { resolveCustomerCodeRef, toCustomerCodeRef } from './customerCodeRef';
-import { orderLengthFromItemCode, varietyFromItemCode } from './lengths';
+import { orderLengthFromItemCode } from './lengths';
 import { mixedStemsPerBox, resolveGroupLines } from './mixGroup';
-import { permittedSubstitutes } from './substitutes.ts';
+import { scopeToOrder } from './substitutes.ts';
+import type { ResolvedSubstituteRow } from './substitutes.ts';
+import { resolveVariantParent } from './useBunchDetails';
 import { resolveTargetUnits } from './targets';
 import type { SalesOrderTargets } from '../../types/packing';
 
@@ -141,6 +143,42 @@ async function fetchSalesOrderTargets({
     );
   }
 
+  // EVERY item code goes through variant_of, on both sides of the substitute
+  // comparison. The table's columns are Links to Item and nothing guarantees
+  // which level they hold; a string compare — or stripping a "-40CM" suffix —
+  // rejects valid scans and breaks outright on a variety not named Name-NNCM.
+  // resolveVariantParent is the same cached lookup useBunchDetails uses for
+  // scanned bunches, so a session pays one call per distinct variety, not one
+  // per scan. See substitutes.ts.
+  const groupLines = await Promise.all(
+    rows.map(async (r) => {
+      const code = _text(r.item_code);
+      return {
+        itemCode: code,
+        variety: code ? await resolveVariantParent(code) : null,
+        orderLength: orderLengthFromItemCode(code),
+      };
+    }),
+  );
+
+  const substituteRows = Array.isArray(doc.custom_substitutes)
+    ? (doc.custom_substitutes as Record<string, unknown>[])
+    : [];
+  const resolvedSubstitutes: ResolvedSubstituteRow[] = [];
+  for (const sub of substituteRows) {
+    const forItem = _text(sub.for_item);
+    const variety = _text(sub.variety);
+    if (!forItem || !variety) continue;
+    resolvedSubstitutes.push({
+      forItem,
+      forTemplate: await resolveVariantParent(forItem),
+      forLength: orderLengthFromItemCode(forItem),
+      variety,
+      varietyTemplate: await resolveVariantParent(variety),
+      notes: _text(sub.notes),
+    });
+  }
+
   // Unit resolution lives in targets.ts so it can be tested without a network
   // call — see targets.test.ts, pinned against both live orders.
   const units = resolveTargetUnits({
@@ -205,20 +243,11 @@ async function fetchSalesOrderTargets({
     // `variety` is the TEMPLATE. Lines carry the variant ("FUSCHIANA-40CM"); a
     // legitimate 60CM bunch resolves to the template "FUSCHIANA" and would fail
     // a variant-to-variant string match. Length is Rule 3's own comparison.
-    groupLines: rows.map((r) => ({
-      itemCode: _text(r.item_code),
-      variety: varietyFromItemCode(_text(r.item_code)),
-      orderLength: orderLengthFromItemCode(_text(r.item_code)),
-    })),
-    // NO NEW REQUEST. custom_substitutes rides along on the Sales Order read
-    // this function already makes for the targets. Scoped to the lines of THIS
-    // pick list, since one order routinely spans several — see substitutes.ts.
-    substitutes: permittedSubstitutes(
-      Array.isArray(doc.custom_substitutes)
-        ? (doc.custom_substitutes as Record<string, unknown>[])
-        : [],
-      rows.map((r) => _text(r.item_code)),
-    ),
+    groupLines,
+    // custom_substitutes rides along on the Sales Order read this function
+    // already makes — no extra fetch for the table itself. Scoped to the lines
+    // of THIS pick list, since one order routinely spans several.
+    substitutes: scopeToOrder(resolvedSubstitutes, groupLines.map((l) => l.variety)),
   };
 }
 

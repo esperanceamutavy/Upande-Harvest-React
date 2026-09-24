@@ -45,7 +45,18 @@ async function getValue(
   return m && Object.keys(m).length > 0 ? m : null;
 }
 
-async function resolveVariantParent(itemCode: string): Promise<string> {
+/**
+ * An item code's TEMPLATE, via `Item.variant_of` — cached per code for the app's
+ * lifetime.
+ *
+ * Exported because substitute matching needs the same relation on both sides:
+ * the table may hold a variant where the bunch holds a template, or the reverse,
+ * and a string compare would reject valid scans. Deliberately NOT re-derived by
+ * parsing a length suffix — the server resolves this relation with `variant_of`
+ * precisely so it survives variants that do not follow a `Name-NNCM` convention,
+ * and the client must match that.
+ */
+export async function resolveVariantParent(itemCode: string): Promise<string> {
   const cached = variantParentCache.get(itemCode);
   if (cached) return cached;
 
