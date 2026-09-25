@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 
-import { readableServerMessage, stripHtml } from './frappeMessage.ts';
+import { readableServerMessage, stripHtml, diagnoseErrorBody } from './frappeMessage.ts';
 
 test('the real NegativeStockError a grader was shown', () => {
     // Verbatim from production, 22 Sep 2026, Grading screen.
@@ -61,4 +61,70 @@ test('readableServerMessage prefers the first message with real content', () => 
     assert.equal(readableServerMessage(['<p></p>'], ['fallback']), 'fallback');
     assert.equal(readableServerMessage([], [undefined, 'second']), 'second');
     assert.equal(readableServerMessage([], []), 'Unknown error');
+});
+
+
+// ── diagnoseErrorBody ───────────────────────────────────────────────────────
+//
+// The picker failed with "Request failed with status code 400" and nothing else.
+// Every request reconstructed by hand returned 200, so the failing one could not
+// be identified from the message. These pin what now reaches the Notice.
+
+test('a 400 naming a rejected field is surfaced', () => {
+    const body = {
+        exc_type: 'ValidationError',
+        exception: 'frappe.exceptions.ValidationError: Unknown column custom_bunch_grp',
+    };
+    const out = diagnoseErrorBody(400, body);
+    assert.ok(out);
+    assert.ok(out.includes('ValidationError'));
+    assert.ok(out.includes('custom_bunch_grp'), 'the rejected field must survive');
+});
+
+test('the LAST traceback line is taken — it names the error', () => {
+    const body = {
+        exc: JSON.stringify([
+            'Traceback (most recent call last):\n  File "frappe/api.py", line 1\nfrappe.exceptions.PermissionError: Not permitted for Sales Order Substitute',
+        ]),
+    };
+    const out = diagnoseErrorBody(400, body);
+    assert.ok(out);
+    assert.ok(out.includes('PermissionError'));
+    assert.ok(out.includes('Sales Order Substitute'));
+    assert.ok(!out.includes('Traceback (most recent'), 'the noise is dropped');
+});
+
+test('HTML in the body is stripped, as everywhere else', () => {
+    const out = diagnoseErrorBody(400, { exception: 'Bad <a href="/app/x">link</a> filter' });
+    assert.ok(out);
+    assert.ok(!out.includes('<a href'));
+    assert.ok(out.includes('link'));
+});
+
+test('an unrecognised body is dumped rather than discarded', () => {
+    const out = diagnoseErrorBody(400, { some_new_key: 'unexpected' });
+    assert.ok(out);
+    assert.ok(out.includes('some_new_key'));
+});
+
+test('a 5xx is left alone — the normal path already handles it', () => {
+    assert.equal(diagnoseErrorBody(500, { exc_type: 'ServerError' }), null);
+});
+
+test('an empty body adds nothing', () => {
+    assert.equal(diagnoseErrorBody(400, {}), null);
+    assert.equal(diagnoseErrorBody(400, null), null);
+    assert.equal(diagnoseErrorBody(400, ''), null);
+});
+
+test('a long traceback is capped so it cannot fill the screen', () => {
+    const out = diagnoseErrorBody(400, { exception: 'x'.repeat(2000) });
+    assert.ok(out);
+    assert.ok(out.length <= 400, `capped, got ${out.length}`);
+    assert.ok(out.endsWith('…'));
+});
+
+test('a plain-string body is surfaced too', () => {
+    const out = diagnoseErrorBody(400, 'Illegal filter on custom_opl');
+    assert.equal(out, 'Illegal filter on custom_opl');
 });

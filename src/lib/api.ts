@@ -1,7 +1,7 @@
 import axios, { AxiosError } from 'axios';
 
 import type { ApiError, FrappeErrorBody } from '../types/frappe';
-import { readableServerMessage, stripHtml } from './frappeMessage.ts';
+import { diagnoseErrorBody, readableServerMessage, stripHtml } from './frappeMessage.ts';
 import { TENANT_KEYS, removeItemFor } from './storage';
 import { useAuthStore } from '../stores/auth';
 
@@ -22,16 +22,48 @@ function parseFrappeError(error: AxiosError<FrappeErrorBody>): ApiError {
     }
   }
 
+  // `??` was the bug's other half: a message of pure markup stripped to ''
+  // is still not null, so it would win over a usable fallback.
+  const base = readableServerMessage(serverMessages, [
+    data?.message,
+    data?.exception,
+    error.message,
+  ]);
+
+  // A 4xx WITH NO _server_messages TELLS THE USER NOTHING.
+  //
+  // Frappe rejects an unknown fieldname or a malformed filter with a 400 whose
+  // body carries exc_type / exception / exc but no _server_messages, so `base`
+  // falls all the way through to axios's "Request failed with status code 400".
+  // That names neither the request nor the reason, and it cost a production
+  // morning: every request reconstructed by hand returned 200, because the
+  // failing one could not be identified from the message.
+  //
+  // So the body AND the request are appended verbatim. Ugly on purpose — an
+  // exception a packer can photograph beats a tidy sentence that says nothing.
+  let message = base;
+  if (serverMessages.length === 0 && status >= 400 && status < 500) {
+    const detail = diagnoseErrorBody(status, data);
+    const method = (error.config?.method ?? '').toUpperCase();
+    const url = error.config?.url ?? '';
+    // The PARAMS are the point: a rejected filter is invisible without them.
+    let params = '';
+    try {
+      const p = error.config?.params;
+      if (p && Object.keys(p as object).length > 0) params = ` ${JSON.stringify(p)}`;
+    } catch {
+      // unserialisable params — the url alone still locates the call
+    }
+    const where = url ? `${method} ${url}${params}` : '';
+
+    const extra = [detail, where].filter((x): x is string => !!x && !base.includes(x));
+    if (extra.length > 0) message = `${base}\n${extra.join('\n')}`;
+  }
+
   return {
     status,
     excType: data?.exc_type,
-    // `??` was the bug's other half: a message of pure markup stripped to ''
-    // is still not null, so it would win over a usable fallback.
-    message: readableServerMessage(serverMessages, [
-      data?.message,
-      data?.exception,
-      error.message,
-    ]),
+    message,
     serverMessages,
   };
 }

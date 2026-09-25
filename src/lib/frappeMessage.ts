@@ -76,3 +76,82 @@ export function readableServerMessage(
     }
     return 'Unknown error';
 }
+
+
+/** Cap a diagnostic so a traceback cannot fill the screen. */
+function truncate(text: string, max = 400): string {
+    const t = text.replace(/\s+/g, ' ').trim();
+    return t.length > max ? t.slice(0, max - 1) + '…' : t;
+}
+
+/**
+ * The LAST line of a Frappe traceback, which is the one that names the error.
+ *
+ * `exc` arrives JSON-encoded: a list whose single element is the whole
+ * traceback. Anything unparseable is treated as a plain string rather than
+ * discarded — a malformed body is exactly when this is most needed.
+ */
+function lastTracebackLine(exc: unknown): string {
+    if (typeof exc !== 'string' || exc.trim().length === 0) return '';
+    let text = exc;
+    try {
+        const parsed: unknown = JSON.parse(exc);
+        if (Array.isArray(parsed) && parsed.length > 0) text = String(parsed[0] ?? '');
+        else if (typeof parsed === 'string') text = parsed;
+    } catch {
+        // not JSON — use it as-is
+    }
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    return lines.length > 0 ? lines[lines.length - 1] : '';
+}
+
+/**
+ * WHAT FRAPPE ACTUALLY SAID, for a 4xx that carries no `_server_messages`.
+ *
+ * Frappe answers a rejected filter or an unknown fieldname with a 400 whose body
+ * holds `exc_type` / `exception` / `exc` but NO `_server_messages`, so the
+ * normal path falls through to axios's "Request failed with status code 400" —
+ * which names neither the request nor the reason. That string cost a production
+ * morning: every request reconstructed by hand returned 200, because the failing
+ * one could not be identified from the message.
+ *
+ * So for 4xx-without-server-messages, the body is surfaced verbatim. It is ugly
+ * on purpose: an unreadable exception a packer can photograph beats a tidy
+ * sentence that says nothing.
+ *
+ * Returns null when there is nothing worth adding — a 5xx, or a body already
+ * covered by the normal path.
+ */
+export function diagnoseErrorBody(status: number, body: unknown): string | null {
+    if (status < 400 || status >= 500) return null;
+
+    if (typeof body === 'string') {
+        const t = body.trim();
+        return t.length > 0 ? truncate(t) : null;
+    }
+    if (!body || typeof body !== 'object') return null;
+
+    const b = body as Record<string, unknown>;
+    const bits: string[] = [];
+
+    const excType = typeof b.exc_type === 'string' ? b.exc_type.trim() : '';
+    if (excType) bits.push(excType);
+
+    const exception = typeof b.exception === 'string' ? b.exception.trim() : '';
+    if (exception) bits.push(stripHtml(exception));
+
+    const line = lastTracebackLine(b.exc);
+    if (line && !bits.some((x) => x.includes(line))) bits.push(stripHtml(line));
+
+    if (bits.length === 0) {
+        // Nothing named the error. Dump what there is rather than nothing —
+        // an unexpected shape is still evidence.
+        try {
+            const dump = JSON.stringify(b);
+            return dump && dump !== '{}' ? truncate(dump) : null;
+        } catch {
+            return null;
+        }
+    }
+    return truncate(bits.join(' — '));
+}

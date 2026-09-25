@@ -82,7 +82,9 @@ export function Notice({
   return (
     <View style={[styles.notice, { backgroundColor: TONE_BG[tone] }]}>
       <Icon size={16} color={fg} style={styles.noticeIcon} />
-      <Text style={[styles.noticeText, { color: fg }]}>{children}</Text>
+      {/* selectable so a blocker can be copied off the device rather than
+          transcribed from a photograph — diagnostics can be long. */}
+      <Text selectable style={[styles.noticeText, { color: fg }]}>{children}</Text>
     </View>
   );
 }
