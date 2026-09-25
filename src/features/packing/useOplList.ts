@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { chunkedQuery } from './chunked.ts';
 import { apiClient } from '../../lib/api';
 import { groupRowsByBox } from './boxProgress';
 import { resolveCustomerCodeRef, toCustomerCodeRef } from './customerCodeRef';
@@ -27,6 +28,10 @@ const SO_DOCTYPE = 'Sales Order';
 
 const LIST_FIELDS = [
   'name',
+  // Selected so the chunked listing can be re-sorted after the merge. Each
+  // batch comes back sorted within itself; without this the merged order would
+  // be batch order, which is arbitrary.
+  'creation',
   'customer',
   'sales_order',
   'custom_total_stems',
@@ -150,12 +155,14 @@ async function fetchContents(oplNames: string[]): Promise<Map<string, Contents>>
   //
   // Note the capital I in "Order Pick LIst": that typo is the real doctype name
   // and the query fails without it.
-  const rows = await getResource(
-    'Pick List Item',
-    ['parent', 'item_code', 'custom_stem_length', 'qty'],
-    [['parent', 'in', oplNames]],
-    undefined,
-    { parent: 'Order Pick LIst' },
+  const rows = await chunkedQuery(oplNames, (batch) =>
+    getResource(
+      'Pick List Item',
+      ['parent', 'item_code', 'custom_stem_length', 'qty'],
+      [['parent', 'in', batch]],
+      undefined,
+      { parent: 'Order Pick LIst' },
+    ),
   );
 
   const seenVariety = new Map<string, Set<string>>();
@@ -205,13 +212,15 @@ async function fetchPackState(oplNames: string[]): Promise<Map<string, PackState
   const byOpl = new Map<string, PackState>();
   if (oplNames.length === 0) return byOpl;
 
-  const lists = await getResource(
-    'Farm Pack List',
-    ['name', 'order_pick_list', 'docstatus'],
-    [
-      ['order_pick_list', 'in', oplNames],
-      ['docstatus', '!=', 2],
-    ],
+  const lists = await chunkedQuery(oplNames, (batch) =>
+    getResource(
+      'Farm Pack List',
+      ['name', 'order_pick_list', 'docstatus'],
+      [
+        ['order_pick_list', 'in', batch],
+        ['docstatus', '!=', 2],
+      ],
+    ),
   );
   if (lists.length === 0) return byOpl;
 
@@ -228,12 +237,14 @@ async function fetchPackState(oplNames: string[]): Promise<Map<string, PackState
   }
 
   // Rows for every pack list at once. Child doctype, so the parent is declared.
-  const rows = await getResource(
-    'Dispatch Form Item',
-    ['parent', 'bucket_id', 'bunch_qty', 'bunch_uom'],
-    [['parent', 'in', [...oplByFpl.keys()]]],
-    undefined,
-    { parent: 'Farm Pack List' },
+  const rows = await chunkedQuery([...oplByFpl.keys()], (batch) =>
+    getResource(
+      'Dispatch Form Item',
+      ['parent', 'bucket_id', 'bunch_qty', 'bunch_uom'],
+      [['parent', 'in', batch]],
+      undefined,
+      { parent: 'Farm Pack List' },
+    ),
   );
 
   const rowsByFpl = new Map<string, Record<string, unknown>[]>();
@@ -291,22 +302,29 @@ async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Ide
   }
 
   const [headers, lines] = await Promise.all([
-    getResource(
-      SO_DOCTYPE,
-      ['name', 'custom_consignee', 'custom_customer_code'],
-      [['name', 'in', soNames]],
+    chunkedQuery(soNames, (batch) =>
+      getResource(
+        SO_DOCTYPE,
+        ['name', 'custom_consignee', 'custom_customer_code'],
+        [['name', 'in', batch]],
+      ),
     ),
     // Sales Order Item is a CHILD doctype, so the parent must be declared or
     // Frappe answers PermissionError — same rule as Pick List Item below.
-    getResource(
-      'Sales Order Item',
-      ['parent', 'custom_opl', 'custom_customer_code', 'custom_number_of_boxes', 'item_code'],
-      [
-        ['parent', 'in', soNames],
-        ['custom_opl', 'in', oplNames],
-      ],
-      undefined,
-      { parent: SO_DOCTYPE },
+    //
+    // THE parent FILTER IS GONE, DELIBERATELY. It was redundant: every OPL in
+    // oplNames came from these very Sales Orders, so custom_opl alone selects
+    // the same rows. Sending both put 46 order names AND 127 OPL names in one
+    // request line — 4,465 characters against a 4,094 limit — and dropping it
+    // halves the line before chunking even applies.
+    chunkedQuery(oplNames, (batch) =>
+      getResource(
+        'Sales Order Item',
+        ['parent', 'custom_opl', 'custom_customer_code', 'custom_number_of_boxes', 'item_code'],
+        [['custom_opl', 'in', batch]],
+        undefined,
+        { parent: SO_DOCTYPE },
+      ),
     ),
   ]);
 
@@ -340,10 +358,8 @@ async function fetchIdentity(soNames: string[], oplNames: string[]): Promise<Ide
     new Set([...codeByOpl.values(), ...codeBySo.values()].filter((v) => v.length > 0)),
   );
   if (refNames.length > 0) {
-    const records = await getResource(
-      'Customer Code',
-      ['name', 'code', 'customer'],
-      [['name', 'in', refNames]],
+    const records = await chunkedQuery(refNames, (batch) =>
+      getResource('Customer Code', ['name', 'code', 'customer'], [['name', 'in', batch]]),
     );
     for (const r of records) {
       const name = String(r.name ?? '');
@@ -411,9 +427,9 @@ async function fetchOplList(range: OplDateFilter): Promise<OplListResult> {
 
     let dates = new Map<string, string>();
     if (soNames.length > 0) {
-      const soRows = await getResource(SO_DOCTYPE, ['name', 'delivery_date'], [
-        ['name', 'in', soNames],
-      ]);
+      const soRows = await chunkedQuery(soNames, (batch) =>
+        getResource(SO_DOCTYPE, ['name', 'delivery_date'], [['name', 'in', batch]]),
+      );
       dates = new Map(
         soRows.map((r) => [
           String(r.name ?? ''),
@@ -452,12 +468,18 @@ async function fetchOplList(range: OplDateFilter): Promise<OplListResult> {
     return { items: [], notice: 'No orders due in this window.' };
   }
 
-  const rows = await getResource(
-    OPL_DOCTYPE,
-    LIST_FIELDS,
-    [...baseFilters, ['sales_order', 'in', [...due.keys()]]],
-    'creation desc',
+  // Chunked like the rest: `due` is every Sales Order in the window, so this
+  // list grows with the day. Ordering is reapplied after the merge, since each
+  // batch is only sorted within itself.
+  const rows = await chunkedQuery([...due.keys()], (batch) =>
+    getResource(
+      OPL_DOCTYPE,
+      LIST_FIELDS,
+      [...baseFilters, ['sales_order', 'in', batch]],
+      'creation desc',
+    ),
   );
+  rows.sort((a, b) => String(b.creation ?? '').localeCompare(String(a.creation ?? '')));
 
   const names = rows.map((r) => String(r.name ?? '')).filter(Boolean);
   const [contents, identity, packState] = await Promise.all([
