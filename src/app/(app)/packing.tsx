@@ -18,6 +18,7 @@ import { formatBoxRanges, resumePlan } from '../../features/packing/resume';
 import { compareLength, displayLength } from '../../features/packing/lengths';
 import { effectiveStemLength, matchBunchToOpl } from '../../features/packing/bunchMatch';
 import { filterOpls } from '../../features/packing/oplSearch';
+import { startedFirst } from '../../features/packing/packState';
 import { lengthFloorFor, substitutesForLine } from '../../features/packing/substitutes';
 import { parseStemsPerBunch } from '../../features/packing/targets';
 import { useBunchDetails } from '../../features/packing/useBunchDetails';
@@ -66,12 +67,16 @@ import type {
 
 const MAX_LOG_ROWS = 12;
 
-/** Progress line for a row that has a pack list. Null when nothing is started. */
+/** Progress line for a row that has a pack list. Null when nothing is started.
+ *
+ *  This badge now does MORE work than it used to. A part-packed pick list and
+ *  an untouched one sit side by side under "To pack", so this line is the only
+ *  thing that tells them apart — see `startedFirst`. */
 function pickerProgress(item: OplListItem): string | null {
   if (item.packStatus === 'packed') {
     return item.boxesTotal > 0 ? `Packed · ${item.boxesTotal} boxes` : 'Packed';
   }
-  if (item.packStatus === 'in_progress') {
+  if (item.started) {
     return item.boxesTotal > 0
       ? `${item.boxesPacked} of ${item.boxesTotal} boxes packed`
       : `${item.boxesPacked} boxes packed`;
@@ -133,11 +138,16 @@ const DATE_OPTIONS = [
 // anyway — a packer may want packed orders from this week, or unpacked ones
 // from tomorrow.
 //
-// The submitted/draft split is only meaningful because a Farm Pack List is now
-// submitted when its LAST box closes.
+// TWO options, not three. "In progress" used to hold pick lists with a draft
+// Farm Pack List, which meant a packer who started a box yesterday could not
+// find it under "To pack" today. Unfinished is unfinished: a draft belongs with
+// the work still to do, and the only honest line is whether the LAST box has
+// closed — which is exactly what submitting a Farm Pack List means.
+//
+// Part-packed rows are still visibly distinct: they sort to the top and carry a
+// "3 of 10 boxes packed" badge. See `startedFirst`.
 const STATUS_OPTIONS = [
   { value: 'to_pack', label: 'To pack' },
-  { value: 'in_progress', label: 'In progress' },
   { value: 'packed', label: 'Packed' },
 ] as const satisfies readonly { value: PackStatus; label: string }[];
 
@@ -636,7 +646,7 @@ export default function PackingScreen() {
     // the order is missing.
     const visible = searching
       ? filterOpls(all, search)
-      : all.filter((i) => i.packStatus === status);
+      : startedFirst(all.filter((i) => i.packStatus === status));
 
     return (
       <Screen title="Packing">

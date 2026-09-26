@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { chunkedQuery } from './chunked.ts';
+import { classifyPackList, NOT_STARTED } from './packState.ts';
 import { apiClient } from '../../lib/api';
 import { groupRowsByBox } from './boxProgress';
 import { resolveCustomerCodeRef, toCustomerCodeRef } from './customerCodeRef';
@@ -198,15 +199,21 @@ async function fetchContents(oplNames: string[]): Promise<Map<string, Contents>>
 
 interface PackState {
   status: PackStatus;
+  started: boolean;
   boxesPacked: number;
 }
 
 /** Packing status for every listed OPL, in BULK.
  *
  *  A Farm Pack List is submitted only when its LAST box closes, so `docstatus`
- *  is authoritative on its own — 1 is fully packed, 0 is started but
- *  incomplete, absent is not begun. Completeness is NEVER inferred from box
- *  counts or `total_stems`.
+ *  is authoritative on its own — 1 is fully packed, anything else is
+ *  unfinished. Completeness is NEVER inferred from box counts or `total_stems`.
+ *
+ *  A DRAFT PACK LIST IS STILL "TO PACK". It used to classify as its own
+ *  'in_progress' status, which put a part-packed pick list on a tab the packer
+ *  was not looking at: OPL-2026-06186 was started on the 25th and the packers
+ *  could not find it on the 26th. Unfinished work stays in one place, and
+ *  `started` carries the "someone has begun this" signal separately.
  */
 async function fetchPackState(oplNames: string[]): Promise<Map<string, PackState>> {
   const byOpl = new Map<string, PackState>();
@@ -230,10 +237,7 @@ async function fetchPackState(oplNames: string[]): Promise<Map<string, PackState
     const opl = String(r.order_pick_list ?? '');
     if (!fpl || !opl) continue;
     oplByFpl.set(fpl, opl);
-    byOpl.set(opl, {
-      status: Number(r.docstatus ?? 0) === 1 ? 'packed' : 'in_progress',
-      boxesPacked: 0,
-    });
+    byOpl.set(opl, { ...classifyPackList(r.docstatus), boxesPacked: 0 });
   }
 
   // Rows for every pack list at once. Child doctype, so the parent is declared.
@@ -404,7 +408,8 @@ function toItem(
     customerCode: resolveCustomerCodeRefFor(r, identity),
     consignee: identity.consigneeBySo.get(String(r.sales_order ?? '')) ?? null,
     // No pack list at all means nothing has been started.
-    packStatus: packState.get(String(r.name ?? ''))?.status ?? 'to_pack',
+    packStatus: packState.get(String(r.name ?? ''))?.status ?? NOT_STARTED.status,
+    started: packState.get(String(r.name ?? ''))?.started ?? NOT_STARTED.started,
     boxesPacked: packState.get(String(r.name ?? ''))?.boxesPacked ?? 0,
     boxesTotal: identity.boxesByOpl.get(String(r.name ?? '')) ?? 0,
     orderLength: identity.lengthByOpl.get(String(r.name ?? '')) ?? null,

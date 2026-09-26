@@ -51,8 +51,17 @@ export interface OplRow {
   qty: number;
 }
 
-/** Packing progress, the picker's second filter dimension. */
-export type PackStatus = 'to_pack' | 'in_progress' | 'packed';
+/** Which picker tab an OPL belongs in — FINISHED or NOT.
+ *
+ *  There is deliberately no 'in_progress' member. A part-packed pick list is
+ *  still work to do, and a packer who started a box yesterday looks for it
+ *  under "To pack" today. Classifying a DRAFT Farm Pack List as its own status
+ *  hid OPL-2026-06186 from the people who were midway through packing it.
+ *
+ *  Whether a pick list has been STARTED is a separate question from which tab
+ *  it belongs in, and `OplListItem.started` answers it. Conflating the two is
+ *  what caused the bug. */
+export type PackStatus = 'to_pack' | 'packed';
 
 /** Delivery-date window for the OPL picker.
  *
@@ -83,9 +92,17 @@ export interface OplListItem {
   consignee: string | null;
 
   // ── Packing status. A Farm Pack List is submitted only when its LAST box
-  // closes, so docstatus alone is authoritative: 1 = fully packed, 0 = started
-  // but incomplete, absent = not begun. Never inferred from box counts.
+  // closes, so docstatus alone is authoritative: 1 = fully packed, anything
+  // else is unfinished. Never inferred from box counts.
+  //
+  //   no Farm Pack List   -> to_pack, started false
+  //   docstatus 0 (draft) -> to_pack, started TRUE
+  //   docstatus 1         -> packed
   packStatus: PackStatus;
+  /** A draft Farm Pack List exists — someone has begun this one. Drives the
+   *  progress badge and lifts the row to the top of "To pack"; it does NOT
+   *  move it to a different tab. */
+  started: boolean;
   /** Boxes that have anything in them. 0 when no pack list exists. */
   boxesPacked: number;
   /** `custom_number_of_boxes` from the SO line. 0 when unknown. */
