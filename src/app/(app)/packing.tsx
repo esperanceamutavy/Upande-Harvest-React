@@ -614,13 +614,29 @@ export default function PackingScreen() {
 
   // ── STEP 1: picker ────────────────────────────────────────────────────────
   if (!session) {
-    const byStatus = (oplList.data?.items ?? []).filter((i) => i.packStatus === status);
-    // THREE filters now, applied in the same order the card presents them.
-    // `searching` distinguishes "nothing matched what you typed" from "nothing
-    // is due in this window" — a packer who mistypes must not conclude the
-    // order is missing.
-    const visible = filterOpls(byStatus, search);
+    const all = oplList.data?.items ?? [];
     const searching = search.trim().length > 0;
+
+    // SEARCH IGNORES THE STATUS TAB, deliberately.
+    //
+    // Searching is a LOOKUP, not a refinement of the current tab. Scoping it to
+    // the tab made a pick list that exists look like one that does not:
+    // OPL-2026-06186 was allocated yesterday and already part-packed, so it sat
+    // under "In progress" while a packer searched "06186" from "To pack" and got
+    // nothing. Reasonably, they concluded it had never been fetched — and the
+    // hunt went looking for a date filter that does not exist. The date segment
+    // filters on the Sales Order's delivery_date ONLY; date_created has not
+    // constrained this query since b5e0885.
+    //
+    // Every row already carries its own status badge, so a cross-tab result
+    // says what it is rather than appearing in the wrong place unexplained.
+    //
+    // `searching` also distinguishes "nothing matched what you typed" from
+    // "nothing is due in this window" — a packer who mistypes must not conclude
+    // the order is missing.
+    const visible = searching
+      ? filterOpls(all, search)
+      : all.filter((i) => i.packStatus === status);
 
     return (
       <Screen title="Packing">
