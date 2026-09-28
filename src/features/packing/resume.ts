@@ -113,10 +113,15 @@ export function formatBoxRanges(boxes: number[]): string | null {
  * shipped on 2026-09-28 and stopped every mixed and bouquet order on the floor
  * while straight orders ran untouched, which is the signature of this mistake.
  *
- * `smallestUnit` is the smallest bunch the box could still receive: 1 when the
- * session counts bunches, and the smallest `Bunch(N)` on the pick list when it
- * counts stems.
+ * `unit` must be a bunch size that REALLY EXISTS — pass the increment of the
+ * bunch just packed. Do not derive it from the pick list's own rows: they carry
+ * uom "Stems" on real orders (OPL-2026-06565 does), so the derived size is
+ * absent, falls back to 1, and every mixed box reads as having room for one
+ * more stem. That is the trap this function exists to prevent, rebuilt.
+ *
+ * Erring high releases a box a little early, costing a few stems. Erring low
+ * strands a packer. So when in doubt, pass the larger unit.
  */
-export function boxAcceptsMore(count: number, capPerBox: number, smallestUnit: number): boolean {
-    return count + Math.max(1, smallestUnit) <= capPerBox;
+export function boxAcceptsMore(count: number, capPerBox: number, unit: number): boolean {
+    return count + Math.max(1, unit) <= capPerBox;
 }

@@ -223,3 +223,32 @@ test('a nonsense unit never reports infinite room', () => {
     assert.ok(!boxAcceptsMore(455, 455, 0), 'zero would otherwise loop forever');
     assert.ok(!boxAcceptsMore(455, 455, -5));
 });
+
+// ── the unit must be a bunch that really exists ────────────────────────────
+//
+// The first attempt at this derived the unit from the pick list's own rows.
+// OPL-2026-06565 carries uom "Stems" on every Pick List Item, so no bunch size
+// could be parsed, the fallback was 1, and a mixed box at 450 of 455 read as
+// having room for one more stem — the packer would have been trapped exactly as
+// before. The unit is now the increment of the bunch just packed.
+
+test('THE SECOND TRAP: a unit of 1 holds a mixed box nothing can fill', () => {
+    // What the OPL-derived unit would have produced on a 450/455 mixed box.
+    assert.ok(boxAcceptsMore(450, 455, 1), 'a 1-stem unit always finds room');
+    // What the scanned bunch produces on the same box.
+    assert.ok(!boxAcceptsMore(450, 455, 10), 'a real Bunch(10) does not fit');
+    assert.ok(!boxAcceptsMore(450, 455, 15), 'nor a Bunch(15)');
+});
+
+test('OPL-2026-06565: box 3 at 429 of 455 still holds for a 13-stem bouquet', () => {
+    assert.ok(boxAcceptsMore(429, 455, 13), 'two bouquets short, one clearly fits');
+    assert.ok(!boxAcceptsMore(455, 455, 13), 'and releases once full');
+});
+
+test('erring high releases, never strands', () => {
+    // A 15 was scanned but a 10 was available: released a touch early.
+    assert.ok(!boxAcceptsMore(448, 455, 15));
+    // The reverse would have held a box only a 10 could fill — still fine,
+    // because planBox advances anyway when the next bunch does not fit.
+    assert.ok(boxAcceptsMore(444, 455, 10));
+});

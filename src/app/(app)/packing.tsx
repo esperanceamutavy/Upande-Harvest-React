@@ -292,15 +292,6 @@ export default function PackingScreen() {
         mixedBunchSizes: oplBunchSizes.size > 1,
       });
 
-      // The smallest bunch this pick list could still receive. A box is full
-      // when nothing more FITS, not when it reaches the cap — see
-      // `boxAcceptsMore`. Counting bunches, that unit is one bunch; counting
-      // stems, it is the smallest Bunch(N) on the list.
-      const smallestUnit =
-        targets.unitLabel === 'bunches' || oplBunchSizes.size === 0
-          ? 1
-          : Math.min(...oplBunchSizes);
-
       // RESUME, do not restart. Reopening a partially packed OPL used to show
       // "Box 1 of N — 0 packed", so the packer refilled full boxes and every
       // scan came back as already packed.
@@ -312,7 +303,7 @@ export default function PackingScreen() {
         targets.unitLabel,
       );
 
-      setSession({ opl, targets, resume, smallestUnit });
+      setSession({ opl, targets, resume });
       setBoxNumber(resume.boxNumber);
       setInBox(resume.inBox);
       setPackedTotal(resume.packedTotal);
@@ -600,7 +591,18 @@ export default function PackingScreen() {
           const stored = truth.perBox.get(plan.boxId);
           if (stored) {
             const storedCount = unit === 'bunches' ? stored.bunches : stored.stems;
-            if (boxAcceptsMore(storedCount, cap, s.smallestUnit)) {
+            // THE UNIT IS THE BUNCH JUST SCANNED, not anything read off the
+            // pick list. OPL rows carry uom "Stems" on real orders —
+            // OPL-2026-06565 does — so a bunch size derived from them is
+            // absent, falls back to 1, and every mixed box reads as "room for
+            // one more stem": the exact trap this check exists to avoid.
+            //
+            // `increment` is the size of a bunch that demonstrably exists and
+            // was just packed. Asking "would another one of those fit?" is the
+            // same question planBox asks, against real evidence. When it is
+            // wrong it errs toward RELEASING the box, which costs a couple of
+            // stems; it can never hold a box that nothing fits.
+            if (boxAcceptsMore(storedCount, cap, increment)) {
               // Genuinely short and another bunch would fit — stay in this box.
               committedInBox = storedCount;
               boxHeld = true;
