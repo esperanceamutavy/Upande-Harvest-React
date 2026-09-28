@@ -553,16 +553,56 @@ export default function PackingScreen() {
 
       // Commit box state only after the write lands.
       packedIdsRef.current.add(bunchId);
-      setBoxNumber(plan.boxId);
-      setInBox(plan.after);
-      setPackedTotal((prev) => prev + increment);
+
+      // ── RECONCILE AT BOX CLOSE ───────────────────────────────────────────
+      //
+      // Box state lived ONLY in this component's memory: seeded once from
+      // resumePlan when the OPL opened, then advanced locally on every scan and
+      // never checked again. The server owned none of it. So any drift — a
+      // second phone on the same pick list, a mis-read bunch size, a scan whose
+      // write landed but whose response did not — persisted for the rest of the
+      // session, and the counter cheerfully announced a box "complete" that the
+      // stored rows said was short.
+      //
+      // FPL-2026-01090 closed boxes at 33, 32 and 14 bouquets against a cap of
+      // 35, and reported each of them full.
+      //
+      // Closing a box is the moment the count actually matters and it happens
+      // once every ~35 scans, so it is the right place to pay for a round trip.
+      // resumePlan returns the LOWEST box still under the cap, so this does not
+      // merely refuse a bad advance — it sends the packer back to finish a box
+      // that was left short earlier, including ones short before this fix.
+      //
+      // Ordinary scans stay local: they must not wait on the network.
+      let committedBox = plan.boxId;
+      let committedInBox = plan.after;
+      if (boxClosed) {
+        try {
+          const truth = await existingMut.mutateAsync(s.opl.name);
+          const reconciled = resumePlan(truth.perBox, cap, s.targets.boxCount, unit);
+          committedBox = reconciled.boxNumber;
+          committedInBox = reconciled.inBox;
+          setPackedTotal(reconciled.packedTotal);
+        } catch {
+          // The pack itself succeeded; a failed reconcile must never look like a
+          // failed scan. Fall back to the local plan and correct on next close.
+          setPackedTotal((prev) => prev + increment);
+        }
+      } else {
+        setPackedTotal((prev) => prev + increment);
+      }
+      setBoxNumber(committedBox);
+      setInBox(committedInBox);
+
+      // The box only really closed if the server agrees we have left it.
+      const boxReallyClosed = boxClosed && committedBox !== plan.boxId;
 
       // ── Box-full announcement ────────────────────────────────────────────
       // The counter card advances on its own; this is the announcement, not the
       // mechanism. It stays on screen until the next scan clears it — a packer
       // looking down at the flowers needs it there when they look up.
       playSubmit();
-      if (boxClosed) {
+      if (boxReallyClosed) {
         // Second cue on top of the usual submit sound, so a closed box is
         // audibly distinct from an ordinary scan without being a new sound to
         // learn. Paired with a heavy haptic; ordinary scans have none.
@@ -572,21 +612,29 @@ export default function PackingScreen() {
 
       const closeText = lastBox
         ? `Box ${plan.boxId} of ${s.targets.boxCount} complete — order fully packed.`
-        : `Box ${plan.boxId} of ${s.targets.boxCount} complete — ${plan.after} of ${cap} ${unit}. Starting Box ${plan.boxId + 1}.`;
+        : `Box ${plan.boxId} of ${s.targets.boxCount} complete — ${plan.after} of ${cap} ${unit}. Starting Box ${committedBox}.`;
 
-      if (boxClosed && res.boxLabelPdfError) {
+      if (boxReallyClosed && res.boxLabelPdfError) {
         // The PACK succeeded; only the label render failed. Warn, never a
         // failed scan — the bunch is in the box either way.
         setFeedback({
           tone: 'warn',
           text: `${closeText} Label PDF failed: ${res.boxLabelPdfError}`,
         });
-      } else if (boxClosed) {
+      } else if (boxReallyClosed) {
         setFeedback({ tone: 'success', text: closeText, pdfUrl: res.boxLabelPdf });
+      } else if (boxClosed) {
+        // We thought the box was full; the stored rows disagree. Say so plainly
+        // and name the box actually being filled, rather than announcing a
+        // completion that did not happen.
+        setFeedback({
+          tone: 'warn',
+          text: `Box ${committedBox} is not full yet — ${committedInBox} of ${cap} ${unit}. Keep filling Box ${committedBox}.`,
+        });
       } else {
         setFeedback({
           tone: 'success',
-          text: `Box ${plan.boxId} — ${plan.after} of ${cap} ${unit} · ${bunch.itemCode} ${bunch.stemLength}`,
+          text: `Box ${committedBox} — ${committedInBox} of ${cap} ${unit} · ${bunch.itemCode} ${bunch.stemLength}`,
         });
       }
 
@@ -597,7 +645,7 @@ export default function PackingScreen() {
         rejection: null,
         detail: `${bunch.itemCode} ${bunch.stemLength} · ${bunch.bunchUom}${
           res.docname ? ` · ${res.docname}` : ''
-        }${boxClosed ? ` · closed Box ${plan.boxId}` : ''}${
+        }${boxReallyClosed ? ` · closed Box ${plan.boxId}` : ''}${
           res.boxLabelPdfError ? ` · label render failed` : ''
         }`,
         // Kept on the row so the label stays reachable once the next scan

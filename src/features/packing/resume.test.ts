@@ -117,3 +117,65 @@ test('formatBoxRanges collapses runs', () => {
     assert.equal(formatBoxRanges([1, 3, 5]), '1, 3, 5');
     assert.equal(formatBoxRanges([]), null);
 });
+
+// ── FPL-2026-01090: boxes left short, and finishing them ───────────────────
+//
+// A bouquet order for APH: 35 bouquets per box x 13 stems = a 455-stem box,
+// 10 boxes. The phone closed boxes at 33, 32 and 14 bouquets and announced each
+// one complete, because box state lived only in its own memory and the stored
+// rows were never consulted after the session opened.
+//
+// These pin the behaviour the reconcile-at-close fix depends on: resumePlan
+// must send the packer BACK to the lowest unfinished box, not forward to a new
+// one. Without that the fix would refuse the advance and then have nowhere to
+// go.
+
+const CAP_455 = 455;
+const TEN_BOXES = 10;
+
+/** The live shape: bouquets per box -> stems, at 13 stems a bouquet. */
+function boxesOf(bouquets: number[]): Map<number, BoxProgress> {
+    const m = new Map<number, BoxProgress>();
+    bouquets.forEach((n, i) => m.set(i + 1, { bunches: n * 4, stems: n * 13 }));
+    return m;
+}
+
+test('THE LIVE CASE: resume returns to the first short box, not a new one', () => {
+    // 35, 35, 33, 32, 14, 17 bouquets -> boxes 1 and 2 full, 3 onward short.
+    const plan = resumePlan(boxesOf([35, 35, 33, 32, 14, 17]), CAP_455, TEN_BOXES, 'stems');
+    assert.equal(plan.boxNumber, 3, 'box 3 holds 429 of 455 and must be finished first');
+    assert.equal(plan.inBox, 429);
+    assert.deepEqual(plan.completeBoxes, [1, 2], 'only two boxes are actually full');
+    assert.equal(plan.isComplete, false);
+});
+
+test('a box one bouquet short is still short', () => {
+    const plan = resumePlan(boxesOf([34]), CAP_455, TEN_BOXES, 'stems');
+    assert.equal(plan.boxNumber, 1);
+    assert.equal(plan.inBox, 442, '34 x 13 = 442, under the 455 cap');
+});
+
+test('an exactly full box moves on', () => {
+    const plan = resumePlan(boxesOf([35]), CAP_455, TEN_BOXES, 'stems');
+    assert.equal(plan.boxNumber, 2);
+    assert.equal(plan.inBox, 0);
+});
+
+test('finishing the short boxes eventually reaches a fresh one', () => {
+    const plan = resumePlan(boxesOf([35, 35, 35, 35, 35, 35]), CAP_455, TEN_BOXES, 'stems');
+    assert.equal(plan.boxNumber, 7, 'six full boxes -> start box 7');
+    assert.equal(plan.completeBoxes.length, 6);
+});
+
+test('the order is only complete when every box of the order is full', () => {
+    const all = Array.from({ length: TEN_BOXES }, () => 35);
+    const plan = resumePlan(boxesOf(all), CAP_455, TEN_BOXES, 'stems');
+    assert.ok(plan.isComplete, 'ten full boxes is the whole order');
+});
+
+test('six boxes packed is NOT the order complete, however it was announced', () => {
+    const plan = resumePlan(boxesOf([35, 35, 33, 32, 14, 17]), CAP_455, TEN_BOXES, 'stems');
+    assert.ok(!plan.isComplete);
+    const packedBouquets = 35 + 35 + 33 + 32 + 14 + 17;
+    assert.equal(plan.packedTotal, packedBouquets * 13, '2,158 stems of 4,550');
+});
