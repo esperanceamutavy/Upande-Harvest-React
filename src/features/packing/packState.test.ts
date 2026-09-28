@@ -69,3 +69,47 @@ test('the input is not mutated', () => {
     startedFirst(input);
     assert.deepEqual(input.map((r) => r.name), ['a', 'b']);
 });
+
+// ── the segments ───────────────────────────────────────────────────────────
+//
+// "In progress" came back by request: packers want to see what is part-done.
+// It is a VIEW over "To pack", not a third classification — a started pick list
+// stays in both, so nobody browsing "To pack" loses it again.
+
+import { matchesSegment } from './packState.ts';
+
+const toPack = { status: 'to_pack' as const, started: false };
+const started = { status: 'to_pack' as const, started: true };
+const packed = { status: 'packed' as const, started: false };
+
+test('an untouched pick list is only under To pack', () => {
+    assert.ok(matchesSegment(toPack, 'to_pack'));
+    assert.ok(!matchesSegment(toPack, 'in_progress'));
+    assert.ok(!matchesSegment(toPack, 'packed'));
+});
+
+test('THE POINT: a part-packed pick list is under BOTH To pack and In progress', () => {
+    assert.ok(matchesSegment(started, 'to_pack'), 'OPL-2026-06186 must stay findable here');
+    assert.ok(matchesSegment(started, 'in_progress'), 'and be visible as part-done');
+    assert.ok(!matchesSegment(started, 'packed'));
+});
+
+test('a submitted pick list is only under Packed', () => {
+    assert.ok(matchesSegment(packed, 'packed'));
+    assert.ok(!matchesSegment(packed, 'to_pack'));
+    assert.ok(!matchesSegment(packed, 'in_progress'));
+});
+
+test('In progress never shows finished work, whatever started says', () => {
+    // Defensive: classifyPackList never produces this, but the segment must not
+    // depend on that holding.
+    assert.ok(!matchesSegment({ status: 'packed', started: true }, 'in_progress'));
+});
+
+test('every row lands in at least one segment', () => {
+    for (const row of [toPack, started, packed]) {
+        const hits = (['to_pack', 'in_progress', 'packed'] as const)
+            .filter((seg) => matchesSegment(row, seg));
+        assert.ok(hits.length >= 1, `${JSON.stringify(row)} fell through every segment`);
+    }
+});

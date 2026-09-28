@@ -31,6 +31,20 @@
 
 export type PackTab = 'to_pack' | 'packed';
 
+/**
+ * The picker's segments. NOT the same thing as PackTab.
+ *
+ * 'in_progress' is a VIEW, not a classification: it narrows "To pack" down to
+ * the pick lists somebody has already begun. A part-packed pick list is still
+ * to pack — that is the whole point of classifying a draft Farm Pack List as
+ * to_pack — so it appears under BOTH "To pack" and "In progress", and packers
+ * looking for unfinished work under "To pack" still find everything.
+ *
+ * The overlap is deliberate and is why this is a separate type. Reading the
+ * segment back into PackTab is what hid OPL-2026-06186 in the first place.
+ */
+export type PickerSegment = PackTab | 'in_progress';
+
 export interface PackClassification {
     status: PackTab;
     /** A pack list exists and is not submitted — someone has begun this one. */
@@ -56,4 +70,15 @@ export const NOT_STARTED: PackClassification = { status: 'to_pack', started: fal
  */
 export function startedFirst<T extends { started: boolean }>(items: T[]): T[] {
     return [...items].sort((a, b) => Number(b.started) - Number(a.started));
+}
+
+/** Does this row belong under `segment`? See `PickerSegment`. */
+export function matchesSegment(
+    item: { status: PackTab; started: boolean },
+    segment: PickerSegment,
+): boolean {
+    // Narrows "To pack" rather than replacing it — a started pick list is in
+    // both, and is unfinished work either way.
+    if (segment === 'in_progress') return item.status === 'to_pack' && item.started;
+    return item.status === segment;
 }

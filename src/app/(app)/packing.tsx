@@ -18,7 +18,8 @@ import { formatBoxRanges, resumePlan } from '../../features/packing/resume';
 import { compareLength, displayLength } from '../../features/packing/lengths';
 import { effectiveStemLength, matchBunchToOpl } from '../../features/packing/bunchMatch';
 import { filterOpls } from '../../features/packing/oplSearch';
-import { startedFirst } from '../../features/packing/packState';
+import { matchesSegment, startedFirst } from '../../features/packing/packState';
+import type { PickerSegment } from '../../features/packing/packState';
 import { lengthFloorFor, substitutesForLine } from '../../features/packing/substitutes';
 import { parseStemsPerBunch } from '../../features/packing/targets';
 import { useBunchDetails } from '../../features/packing/useBunchDetails';
@@ -138,18 +139,27 @@ const DATE_OPTIONS = [
 // anyway — a packer may want packed orders from this week, or unpacked ones
 // from tomorrow.
 //
-// TWO options, not three. "In progress" used to hold pick lists with a draft
-// Farm Pack List, which meant a packer who started a box yesterday could not
-// find it under "To pack" today. Unfinished is unfinished: a draft belongs with
-// the work still to do, and the only honest line is whether the LAST box has
-// closed — which is exactly what submitting a Farm Pack List means.
+// "IN PROGRESS" NARROWS "TO PACK". IT DOES NOT REMOVE FROM IT.
 //
-// Part-packed rows are still visibly distinct: they sort to the top and carry a
-// "3 of 10 boxes packed" badge. See `startedFirst`.
+// It once held pick lists with a draft Farm Pack List INSTEAD of "To pack", so
+// a packer who started a box yesterday could not find it under "To pack" today
+// — OPL-2026-06186. The classification stays fixed: a draft is unfinished work
+// and belongs with the work still to do, and only a submitted Farm Pack List
+// (its LAST box closed) counts as packed.
+//
+// The segment is back because seeing what is part-done is worth a tap, but as a
+// VIEW over "To pack" rather than a third bucket. A started pick list appears
+// in both, so browsing "To pack" still shows everything unfinished. See
+// `PickerSegment` — the overlap is the reason it is a separate type from
+// PackStatus, and collapsing the two is the original bug.
+//
+// Part-packed rows are also distinct without switching: they sort to the top of
+// "To pack" and carry a "3 of 10 boxes packed" badge. See `startedFirst`.
 const STATUS_OPTIONS = [
   { value: 'to_pack', label: 'To pack' },
+  { value: 'in_progress', label: 'In progress' },
   { value: 'packed', label: 'Packed' },
-] as const satisfies readonly { value: PackStatus; label: string }[];
+] as const satisfies readonly { value: PickerSegment; label: string }[];
 
 type FeedbackMsg = { tone: NoticeTone; text: string; pdfUrl?: string | null };
 
@@ -171,7 +181,7 @@ export default function PackingScreen() {
   const [range, setRange] = useState<OplDateFilter>('packing_today');
   // Status filters client-side off the already-fetched list, so switching it is
   // instant and does not refetch.
-  const [status, setStatus] = useState<PackStatus>('to_pack');
+  const [status, setStatus] = useState<PickerSegment>('to_pack');
   // Search does the same, over the fields the bulk fetches already put in
   // memory — see oplSearch.ts. No query, and it keeps working offline once the
   // list is on screen.
@@ -646,7 +656,9 @@ export default function PackingScreen() {
     // the order is missing.
     const visible = searching
       ? filterOpls(all, search)
-      : startedFirst(all.filter((i) => i.packStatus === status));
+      : startedFirst(
+          all.filter((i) => matchesSegment({ status: i.packStatus, started: i.started }, status)),
+        );
 
     return (
       <Screen title="Packing">
