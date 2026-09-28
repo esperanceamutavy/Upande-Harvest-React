@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { formatBoxRanges, resumePlan, type BoxProgress } from './resume.ts';
+import { boxAcceptsMore, formatBoxRanges, resumePlan, type BoxProgress } from './resume.ts';
 
 const box = (bunches: number, stems: number): BoxProgress => ({ bunches, stems });
 
@@ -178,4 +178,48 @@ test('six boxes packed is NOT the order complete, however it was announced', () 
     assert.ok(!plan.isComplete);
     const packedBouquets = 35 + 35 + 33 + 32 + 14 + 17;
     assert.equal(plan.packedTotal, packedBouquets * 13, '2,158 stems of 4,550');
+});
+
+// ── boxAcceptsMore ─────────────────────────────────────────────────────────
+//
+// THE TEST THAT WOULD HAVE CAUGHT IT. The reconcile-at-close fix first shipped
+// asking "is this box at the cap?", which is only ever true for a straight box.
+// Every mixed and bouquet order was sent back into a box it had rightly closed
+// and could never fill, and packing stopped on the floor.
+//
+// These cases are built from the live pick lists that were being packed at the
+// time, so the straight/mixed split is pinned rather than assumed.
+
+test('a straight box lands exactly on the cap and is then finished', () => {
+    // Bunch(10) into a 100-stem box: 10 bunches, no remainder.
+    assert.ok(boxAcceptsMore(90, 100, 10), 'room for one more');
+    assert.ok(!boxAcceptsMore(100, 100, 10), 'exactly full');
+});
+
+test('THE BREAKAGE: a mixed box closing under the cap is still finished', () => {
+    // FPL-2026-01125 mixes Bunch(10) and Bunch(15) — nothing fills the last 5
+    // stems of a 455 cap, so 450 is a finished box.
+    assert.ok(!boxAcceptsMore(450, 455, 10), 'no bunch fits the 5-stem gap');
+    assert.ok(boxAcceptsMore(440, 455, 10), '15 left, a Bunch(10) still fits');
+});
+
+test('a box closed genuinely early is still refused', () => {
+    // FPL-2026-01090: box 3 held 429 of 455 and a 13-stem bouquet fits the gap.
+    assert.ok(boxAcceptsMore(429, 455, 2), 'a 26-stem gap takes more');
+    assert.ok(boxAcceptsMore(416, 455, 2), 'box 4 at 416 likewise');
+});
+
+test('counting in bunches, one bunch is the smallest unit', () => {
+    assert.ok(boxAcceptsMore(33, 35, 1));
+    assert.ok(boxAcceptsMore(34, 35, 1), 'one bunch short is not full');
+    assert.ok(!boxAcceptsMore(35, 35, 1));
+});
+
+test('an over-filled box takes nothing more', () => {
+    assert.ok(!boxAcceptsMore(460, 455, 10));
+});
+
+test('a nonsense unit never reports infinite room', () => {
+    assert.ok(!boxAcceptsMore(455, 455, 0), 'zero would otherwise loop forever');
+    assert.ok(!boxAcceptsMore(455, 455, -5));
 });

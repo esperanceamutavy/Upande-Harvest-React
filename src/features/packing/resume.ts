@@ -94,3 +94,29 @@ export function formatBoxRanges(boxes: number[]): string | null {
 
     return parts.join(', ');
 }
+
+/**
+ * Can this box still take another bunch?
+ *
+ * ⛔ "FULL" IS NOT `count === cap`. It is "nothing more would fit" — exactly the
+ * rule planBox applies when it decides to advance:
+ *
+ *     if (count + increment > capPerBox) { nextBox += 1 }
+ *
+ * A STRAIGHT box lands exactly on the cap, because one bunch size divides it:
+ * ten Bunch(10) into a 100-stem box. A MIXED box does not. With Bunch(10) and
+ * Bunch(15) against a 455-stem cap, a box legitimately closes at 450 — no
+ * remaining bunch fills the last 5 stems — and it is finished at 450.
+ *
+ * Treating "below cap" as "unfinished" therefore traps a packer in a mixed box
+ * forever: nothing exists that fits the gap, so they can never leave it. That
+ * shipped on 2026-09-28 and stopped every mixed and bouquet order on the floor
+ * while straight orders ran untouched, which is the signature of this mistake.
+ *
+ * `smallestUnit` is the smallest bunch the box could still receive: 1 when the
+ * session counts bunches, and the smallest `Bunch(N)` on the pick list when it
+ * counts stems.
+ */
+export function boxAcceptsMore(count: number, capPerBox: number, smallestUnit: number): boolean {
+    return count + Math.max(1, smallestUnit) <= capPerBox;
+}

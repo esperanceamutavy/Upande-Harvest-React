@@ -250,6 +250,16 @@ export interface PackingSession {
   targets: SalesOrderTargets;
   /** Where the session resumed from — see features/packing/resume.ts. */
   resume: ResumeState;
+  /**
+   * The smallest bunch this pick list could still receive, in the session's
+   * unit: 1 when counting bunches, the smallest `Bunch(N)` on the OPL when
+   * counting stems.
+   *
+   * A box is full when nothing more FITS, not when it reaches the cap — a mixed
+   * box with Bunch(10) and Bunch(15) against a 455 cap finishes at 450. See
+   * `boxAcceptsMore`.
+   */
+  smallestUnit: number;
 }
 
 /**

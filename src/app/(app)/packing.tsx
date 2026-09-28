@@ -14,7 +14,7 @@ import { useOplList } from '../../features/packing/useOplList';
 import { useOrderPickList } from '../../features/packing/useOrderPickList';
 import { useSalesOrderTargets } from '../../features/packing/useSalesOrderTargets';
 import { useExistingPack } from '../../features/packing/useExistingPack';
-import { formatBoxRanges, resumePlan } from '../../features/packing/resume';
+import { boxAcceptsMore, formatBoxRanges, resumePlan } from '../../features/packing/resume';
 import { compareLength, displayLength } from '../../features/packing/lengths';
 import { effectiveStemLength, matchBunchToOpl } from '../../features/packing/bunchMatch';
 import { filterOpls } from '../../features/packing/oplSearch';
@@ -292,6 +292,15 @@ export default function PackingScreen() {
         mixedBunchSizes: oplBunchSizes.size > 1,
       });
 
+      // The smallest bunch this pick list could still receive. A box is full
+      // when nothing more FITS, not when it reaches the cap — see
+      // `boxAcceptsMore`. Counting bunches, that unit is one bunch; counting
+      // stems, it is the smallest Bunch(N) on the list.
+      const smallestUnit =
+        targets.unitLabel === 'bunches' || oplBunchSizes.size === 0
+          ? 1
+          : Math.min(...oplBunchSizes);
+
       // RESUME, do not restart. Reopening a partially packed OPL used to show
       // "Box 1 of N — 0 packed", so the packer refilled full boxes and every
       // scan came back as already packed.
@@ -303,7 +312,7 @@ export default function PackingScreen() {
         targets.unitLabel,
       );
 
-      setSession({ opl, targets, resume });
+      setSession({ opl, targets, resume, smallestUnit });
       setBoxNumber(resume.boxNumber);
       setInBox(resume.inBox);
       setPackedTotal(resume.packedTotal);
@@ -554,48 +563,60 @@ export default function PackingScreen() {
       // Commit box state only after the write lands.
       packedIdsRef.current.add(bunchId);
 
-      // ── RECONCILE AT BOX CLOSE ───────────────────────────────────────────
+      // ── CONFIRM THE BOX IS FULL BEFORE LEAVING IT ───────────────────────
       //
-      // Box state lived ONLY in this component's memory: seeded once from
-      // resumePlan when the OPL opened, then advanced locally on every scan and
-      // never checked again. The server owned none of it. So any drift — a
-      // second phone on the same pick list, a mis-read bunch size, a scan whose
-      // write landed but whose response did not — persisted for the rest of the
-      // session, and the counter cheerfully announced a box "complete" that the
-      // stored rows said was short.
+      // Box state lives in this component's memory: seeded from resumePlan when
+      // the pick list opens, then advanced locally on every scan. Nothing
+      // checked it against the stored rows, so drift lasted the whole session
+      // and the counter announced a box "complete" that the Farm Pack List said
+      // was short. FPL-2026-01090 closed boxes at 33, 32 and 14 bouquets.
       //
-      // FPL-2026-01090 closed boxes at 33, 32 and 14 bouquets against a cap of
-      // 35, and reported each of them full.
+      // THIS CHECK CAN ONLY HOLD THE PACKER WHERE THEY ARE. It never moves them
+      // to a different box. The first version of this fix asked resumePlan
+      // where they belonged, and resumePlan sends them to the lowest box under
+      // the cap — which for a MIXED box is a box that is legitimately finished,
+      // because varied bunch sizes leave a gap nothing fits. Every mixed and
+      // bouquet order was trapped in a box it could never fill while straight
+      // orders ran fine. Holding position cannot strand anyone: the worst case
+      // is one extra bunch in a box.
       //
-      // Closing a box is the moment the count actually matters and it happens
-      // once every ~35 scans, so it is the right place to pay for a round trip.
-      // resumePlan returns the LOWEST box still under the cap, so this does not
-      // merely refuse a bad advance — it sends the packer back to finish a box
-      // that was left short earlier, including ones short before this fix.
+      // A read that does not mention this box is not evidence about it, so it
+      // is ignored rather than believed. Treating missing data as "nothing
+      // packed" is the other half of what went wrong.
       //
-      // Ordinary scans stay local: they must not wait on the network.
-      let committedBox = plan.boxId;
+      // Once every ~35 scans, so the round trip is affordable. Ordinary scans
+      // stay local and never wait on the network.
+      //
+      // ADVANCING IS LAZY. The card always shows the box just filled; planBox
+      // moves to the next one on the FOLLOWING scan, when it finds the count
+      // would overflow. So holding a box open is not done by changing the box
+      // number — it is done by writing back the TRUE count, which is under the
+      // cap and therefore leaves planBox with room.
       let committedInBox = plan.after;
+      let boxHeld = false;
       if (boxClosed) {
         try {
           const truth = await existingMut.mutateAsync(s.opl.name);
-          const reconciled = resumePlan(truth.perBox, cap, s.targets.boxCount, unit);
-          committedBox = reconciled.boxNumber;
-          committedInBox = reconciled.inBox;
-          setPackedTotal(reconciled.packedTotal);
+          const stored = truth.perBox.get(plan.boxId);
+          if (stored) {
+            const storedCount = unit === 'bunches' ? stored.bunches : stored.stems;
+            if (boxAcceptsMore(storedCount, cap, s.smallestUnit)) {
+              // Genuinely short and another bunch would fit — stay in this box.
+              committedInBox = storedCount;
+              boxHeld = true;
+            }
+          }
         } catch {
-          // The pack itself succeeded; a failed reconcile must never look like a
-          // failed scan. Fall back to the local plan and correct on next close.
-          setPackedTotal((prev) => prev + increment);
+          // The pack itself landed; a failed check must never look like a failed
+          // scan. Keep the local plan and re-check at the next close.
         }
-      } else {
-        setPackedTotal((prev) => prev + increment);
       }
-      setBoxNumber(committedBox);
+      setPackedTotal((prev) => prev + increment);
+      setBoxNumber(plan.boxId);
       setInBox(committedInBox);
 
-      // The box only really closed if the server agrees we have left it.
-      const boxReallyClosed = boxClosed && committedBox !== plan.boxId;
+      // The box really closed unless the stored rows held it open.
+      const boxReallyClosed = boxClosed && !boxHeld;
 
       // ── Box-full announcement ────────────────────────────────────────────
       // The counter card advances on its own; this is the announcement, not the
@@ -612,7 +633,7 @@ export default function PackingScreen() {
 
       const closeText = lastBox
         ? `Box ${plan.boxId} of ${s.targets.boxCount} complete — order fully packed.`
-        : `Box ${plan.boxId} of ${s.targets.boxCount} complete — ${plan.after} of ${cap} ${unit}. Starting Box ${committedBox}.`;
+        : `Box ${plan.boxId} of ${s.targets.boxCount} complete — ${plan.after} of ${cap} ${unit}. Starting Box ${plan.boxId + 1}.`;
 
       if (boxReallyClosed && res.boxLabelPdfError) {
         // The PACK succeeded; only the label render failed. Warn, never a
@@ -629,12 +650,12 @@ export default function PackingScreen() {
         // completion that did not happen.
         setFeedback({
           tone: 'warn',
-          text: `Box ${committedBox} is not full yet — ${committedInBox} of ${cap} ${unit}. Keep filling Box ${committedBox}.`,
+          text: `Box ${plan.boxId} is not full yet — ${committedInBox} of ${cap} ${unit}. Keep filling Box ${plan.boxId}.`,
         });
       } else {
         setFeedback({
           tone: 'success',
-          text: `Box ${committedBox} — ${committedInBox} of ${cap} ${unit} · ${bunch.itemCode} ${bunch.stemLength}`,
+          text: `Box ${plan.boxId} — ${committedInBox} of ${cap} ${unit} · ${bunch.itemCode} ${bunch.stemLength}`,
         });
       }
 
