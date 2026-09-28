@@ -506,7 +506,12 @@ export default function PackingScreen() {
         reject(
           bunchId,
           mismatch,
-          `${bunch.stemLength} is shorter than the ${floorFor(s, bunch)} line it would fill. Pick ${floorFor(s, bunch)} or longer.`,
+          // The MEASURED length, not the header. For a bouquet those differ —
+          // effectiveStemLength takes the shortest component — and printing the
+          // header produced "50CM is shorter than the 50CM line", which tells a
+          // packer nothing and sent us looking for a broken comparison that was
+          // never broken.
+          `${effectiveStemLength(bunch, compareLength)} is shorter than the ${floorFor(s, bunch)} line it would fill. Pick ${floorFor(s, bunch)} or longer.`,
         );
         return;
       }
@@ -813,6 +818,25 @@ export default function PackingScreen() {
     [...new Set(session.opl.rows.map((r) => r.stemLength))],
   );
 
+  // ── IS THE ORDER DONE? ASK THE BOXES, NOT THE RUNNING TOTAL ─────────────
+  //
+  // This used to read `packedTotal >= targets.orderTotal`, and packedTotal is
+  // not trustworthy for a bouquet: one scanned bouquet writes one Dispatch Form
+  // Item row PER COMPONENT, and the per-box totals sum bunch_qty across all of
+  // them, so a 4-variety bouquet counts four times. SAL-ORD-2026-02535 showed
+  // "664 of 350 bunches" - 190% - for 166 bouquets actually packed.
+  //
+  // So the footer announced a finished order that was less than half done. The
+  // boxes are the honest measure and are what planBox already enforces: the
+  // order is finished when the LAST box will take nothing more.
+  //
+  // Deliberately not gating on packedTotal even as a fallback. An inflated
+  // count would lock the screen on an unfinished order, which is worse than the
+  // wrong caption it replaces.
+  const orderComplete =
+    session.resume.isComplete ||
+    (boxNumber >= session.targets.boxCount && inBox >= session.targets.capPerBox);
+
   // Boxes finished BEFORE this session plus any finished during it. boxNumber
   // only advances once a box fills, so every box below it is complete.
   const completedBoxes = formatBoxRanges(
@@ -988,7 +1012,9 @@ export default function PackingScreen() {
               autoCapitalize="characters"
               placeholder={busy ? 'Packing…' : 'Scan bunch QR code…'}
               placeholderTextColor={colors.muted}
-              editable={!busy}
+              // A finished order must STOP taking scans, not reject each one
+              // with whatever reason the rules happen to produce.
+              editable={!busy && !orderComplete}
             />
             <Pressable
               style={styles.qrBtn}
@@ -1031,7 +1057,7 @@ export default function PackingScreen() {
       ) : null}
 
       <Text style={styles.hint}>
-        {session.resume.isComplete || packedTotal >= session.targets.orderTotal
+        {orderComplete
           ? 'Order fully packed. Change pick list to start another.'
           : 'Boxes advance automatically when the pack rate is reached.'}
       </Text>

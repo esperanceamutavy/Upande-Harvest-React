@@ -14,6 +14,7 @@ import {
     matchBunchToOpl,
     type MatchableBunch,
 } from './bunchMatch.ts';
+import { compareLength } from './lengths.ts';
 
 const mono: MatchableBunch = {
     itemCode: 'Celeb-50CM',
@@ -102,4 +103,60 @@ test('LENGTH — falls back to the header when components carry none', () => {
         components: [{ stemLength: '' }, { stemLength: '' }],
     };
     assert.equal(effectiveStemLength(b, cmp), '50CM');
+});
+
+// ── equal lengths must pass ────────────────────────────────────────────────
+//
+// BUNCH-380466 is a 50CM bouquet scanned against a 50CM line and rejected with
+//
+//     "50CM is shorter than the 50CM line it would fill. Pick 50CM or longer."
+//
+// compareLength was never at fault — it is `bunch >= order` and always has
+// been. The bouquet's components are Orange Wave-50CM, Orange babe-50CM,
+// Pumba-50CM and Eucalyptus-50CM, and the PUMBA row recorded stem_length
+// "40CM" against its own -50CM item code. effectiveStemLength takes the
+// shortest component, so the bouquet measured 40CM.
+//
+// useBunchDetails now resolves a component's length from its item code, which
+// is what the order, the pick list and the box label all key on.
+
+test('EQUAL LENGTHS PASS: 50CM against a 50CM line is accepted', () => {
+    assert.equal(compareLength('50CM', '50CM'), 'ok');
+});
+
+test('longer passes, shorter does not', () => {
+    assert.equal(compareLength('60CM', '50CM'), 'ok');
+    assert.equal(compareLength('40CM', '50CM'), 'shorter');
+});
+
+test('THE LIVE BOUQUET: every component reads 50CM once resolved from item codes', () => {
+    // What fetchComponents now produces for BUNCH-380466.
+    const bunch = {
+        isMixedBunch: true,
+        stemLength: '50CM',
+        components: [
+            { stemLength: '50CM' }, // Orange Wave-50CM
+            { stemLength: '50CM' }, // Orange babe-50CM
+            { stemLength: '50CM' }, // Pumba-50CM  (stem_length field said 40CM)
+            { stemLength: '50CM' }, // Eucalyptus-50CM
+        ],
+    };
+    assert.equal(effectiveStemLength(bunch, compareLength), '50CM');
+    assert.equal(compareLength(effectiveStemLength(bunch, compareLength), '50CM'), 'ok');
+});
+
+test('a bouquet that IS genuinely short is still refused', () => {
+    // Not every short component is a data slip: a -40CM item really is 40CM.
+    const bunch = {
+        isMixedBunch: true,
+        stemLength: '50CM',
+        components: [{ stemLength: '50CM' }, { stemLength: '40CM' }],
+    };
+    assert.equal(effectiveStemLength(bunch, compareLength), '40CM');
+    assert.equal(compareLength(effectiveStemLength(bunch, compareLength), '50CM'), 'shorter');
+});
+
+test('a straight bunch is measured by its own length', () => {
+    const bunch = { isMixedBunch: false, stemLength: '50CM', components: [] };
+    assert.equal(effectiveStemLength(bunch, compareLength), '50CM');
 });

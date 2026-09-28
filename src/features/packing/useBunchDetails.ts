@@ -2,6 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 
 import { apiClient } from '../../lib/api';
 import { parseStemsPerBunch } from './targets';
+import { orderLengthFromItemCode, parseLengthCm } from './lengths';
 import type { BunchComponent, BunchDetails } from '../../types/packing';
 
 // Resolves a scanned bunch id into everything the payload and Rule 3 need.
@@ -99,11 +100,35 @@ async function fetchComponents(bunchId: string): Promise<BunchComponent[]> {
   for (const r of rows) {
     const variety = String(r.variety ?? '').trim();
     if (!variety) continue;
+    // A COMPONENT'S OWN ITEM CODE WINS OVER ITS stem_length FIELD.
+    //
+    // BUNCH-380466 is a 50CM bouquet whose every component is a -50CM item,
+    // but the Pumba row records stem_length "40CM". effectiveStemLength takes
+    // the SHORTEST component, so the bouquet measured 40CM, failed a 50CM line,
+    // and the rejection printed the header length on both sides:
+    //
+    //     "50CM is shorter than the 50CM line it would fill."
+    //
+    // The comparison was never wrong — compareLength is >= and always has been.
+    // One component's length field simply contradicted its own item code.
+    //
+    // The item code is what the order, the pick list and the box label all key
+    // on, so it is the spec; a stray stem_length is a grading-entry slip. And
+    // the bouquet is already BUILT: refusing it at packing cannot un-make it,
+    // it only stops the packer. The disagreement is logged rather than hidden.
+    const rawLength = String(r.stem_length ?? '').trim();
+    const codedLength = orderLengthFromItemCode(variety);
+    if (codedLength && parseLengthCm(rawLength) !== parseLengthCm(codedLength)) {
+      console.warn(
+        `[packing] component ${variety} records stem_length "${rawLength}" but its ` +
+          `item code says "${codedLength}" - using the item code`,
+      );
+    }
     out.push({
       variety,
       variantParent: await resolveVariantParent(variety),
       stems: Number(r.stems ?? 0) || 0,
-      stemLength: String(r.stem_length ?? '').trim(),
+      stemLength: codedLength ?? rawLength,
     });
   }
   return out;
