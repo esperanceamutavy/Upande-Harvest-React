@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { chunkedQuery } from './chunked.ts';
 import { classifyPackList, NOT_STARTED } from './packState.ts';
+import { localDate, packingDayPlus, startOfPackingWeek } from './packingDay.ts';
 import { apiClient } from '../../lib/api';
 import { groupRowsByBox } from './boxProgress';
 import { resolveCustomerCodeRef, toCustomerCodeRef } from './customerCodeRef';
@@ -42,42 +43,28 @@ const LIST_FIELDS = [
 
 /** Local-calendar YYYY-MM-DD. Deliberately not `toISOString`, which would shift
  *  the date across midnight for any timezone east of UTC — including EAT. */
-function localDate(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function shiftDays(n: number): Date {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return d;
-}
-
-/** Monday as the first day of the week. */
-function startOfWeek(): Date {
-  const d = new Date();
-  const dow = d.getDay(); // 0 = Sunday
-  d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
-  return d;
-}
-
-/** Inclusive `[from, to]` on `delivery_date`, or null for "all time". */
+/** Inclusive `[from, to]` on `delivery_date`, or null for "all time".
+ *
+ *  EVERY WINDOW IS ANCHORED ON THE PACKING DAY, not the calendar day — see
+ *  packingDay.ts. The shift runs past midnight, and these used to roll at
+ *  00:00 underneath it: at 23:59 "Today" showed tonight's work and one minute
+ *  later it showed the next day's orders, emptying the tab the packers were
+ *  standing at. */
 function deliveryWindow(range: OplDateFilter): [string, string] | null {
   switch (range) {
     case 'packing_today': {
-      // delivery_date = TOMORROW. Labelled "Today" because that is the work:
-      // packing runs a day ahead of the flight, so an order due today was
-      // dispatched already and has no business on the bench. On the 21st this
-      // shows deliveries dated the 22nd.
-      const due = localDate(shiftDays(1));
+      // delivery_date = the packing day + 1. Labelled "Today" because that is
+      // the work: packing runs a day ahead of the flight, so an order due today
+      // was dispatched already and has no business on the bench.
+      const due = packingDayPlus(1);
       return [due, due];
     }
     case 'yesterday': {
-      const y = localDate(shiftDays(-1));
+      const y = packingDayPlus(-1);
       return [y, y];
     }
     case 'week': {
-      const from = startOfWeek();
+      const from = startOfPackingWeek();
       const to = new Date(from);
       to.setDate(to.getDate() + 6);
       return [localDate(from), localDate(to)];
