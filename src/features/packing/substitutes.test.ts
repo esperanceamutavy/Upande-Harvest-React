@@ -180,3 +180,29 @@ test('matching is on resolved templates, never on the raw codes', () => {
         '40CM',
     );
 });
+
+// A VARIANT NEVER MATCHES. substitutesForLine compares against forTemplate, so
+// the caller must pass the variant_of-resolved template. Passing an OPL row's
+// raw item_code ("Monza-50CM") silently returns nothing — that is exactly how
+// substitutes failed to render on straight orders while working on mixed ones.
+// Live case: SAL-ORD-2026-02563, Monza-50CM -> Madam Red-50CM.
+test('substitutesForLine needs the template, not the variant', () => {
+    const monza = {
+        forItem: 'Monza-50CM',
+        forTemplate: 'Monza',
+        forLength: '50CM',
+        variety: 'Madam Red-50CM',
+        varietyTemplate: 'Madam Red',
+        notes: null,
+    };
+    const subs = scopeToOrder([monza], ['Monza']);
+
+    assert.deepEqual(
+        substitutesForLine(subs, { template: 'Monza', length: '50CM' }),
+        ['Madam Red'],
+    );
+    assert.deepEqual(
+        substitutesForLine(subs, { template: 'Monza-50CM', length: '50CM' }),
+        [],
+    );
+});

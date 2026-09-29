@@ -950,19 +950,30 @@ export default function PackingScreen() {
                 {row.uom}
                 {row.shelf ? ` · shelf ${row.shelf}` : ''}
               </Text>
-              {/* See the mixed branch above — quiet on purpose. */}
-              {substitutesForLine(session.targets.substitutes, {
-                template: row.itemCode,
-                length: row.stemLength,
-              }).length > 0 ? (
-                <Text style={styles.itemMeta} numberOfLines={2}>
-                  or{' '}
-                  {substitutesForLine(session.targets.substitutes, {
-                    template: row.itemCode,
-                    length: row.stemLength,
-                  }).join(', ')}
-                </Text>
-              ) : null}
+              {/* See the mixed branch above — quiet on purpose.
+
+                  MATCHED ON THE TEMPLATE, not row.itemCode. An OPL row carries
+                  the VARIANT ("Monza-50CM") while custom_substitutes resolves
+                  for_item to its template ("Monza"), so passing the row's code
+                  matched nothing and substitutes never rendered on a straight
+                  order — while the mixed branch, which passes the already
+                  resolved line.variety, worked. groupLines holds the resolved
+                  template for the same lines, so it is the source here too.
+                  Same variant-vs-template trap as mixGroup. */}
+              {(() => {
+                const line = session.targets.groupLines.find(
+                  (l) => l.itemCode === row.itemCode || l.variety === row.itemCode,
+                );
+                const subs = substitutesForLine(session.targets.substitutes, {
+                  template: line?.variety ?? row.itemCode,
+                  length: line?.orderLength ?? row.stemLength,
+                });
+                return subs.length > 0 ? (
+                  <Text style={styles.itemMeta} numberOfLines={2}>
+                    or {subs.join(', ')}
+                  </Text>
+                ) : null;
+              })()}
             </View>
               ))}
         </View>
