@@ -64,9 +64,11 @@ function mileleItems() {
 // and Paranita-50CM are null. Packrates differ per line: 108 + 72 + 72 = 252.
 function omniFloraItems() {
     return [
-        { item_code: 'Brinessa-50CM', custom_opl: 'OPL-OMNI', custom_mixed_box: 1, custom_mix_group: 7, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 108, custom_number_of_boxes: 2 },
-        { item_code: 'Dutchess-50CM', custom_opl: null, custom_mixed_box: 1, custom_mix_group: 7, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 72, custom_number_of_boxes: 2 },
-        { item_code: 'Paranita-50CM', custom_opl: null, custom_mixed_box: 1, custom_mix_group: 7, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 72, custom_number_of_boxes: 2 },
+        // Every line carries the GROUP packrate, 252 — the box capacity. Under
+        // the old contract these read 108 / 72 / 72, each variety's share.
+        { item_code: 'Brinessa-50CM', custom_opl: 'OPL-OMNI', custom_mixed_box: 1, custom_mix_group: 7, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 252, custom_number_of_boxes: 2 },
+        { item_code: 'Dutchess-50CM', custom_opl: null, custom_mixed_box: 1, custom_mix_group: 7, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 252, custom_number_of_boxes: 2 },
+        { item_code: 'Paranita-50CM', custom_opl: null, custom_mixed_box: 1, custom_mix_group: 7, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 252, custom_number_of_boxes: 2 },
     ];
 }
 
@@ -91,20 +93,49 @@ test('Milele: the unrelated straight line is NOT dragged in by group id 0', () =
     assert.ok(!rows.some((r) => r.item_code === 'Blue Lagoon-50CM'));
 });
 
-test('Milele: per-box target is 500 — ten lines at 50, not the nine that were linked', () => {
+test('Milele: the group resolves to ten lines, not the nine that were linked', () => {
     const { rows } = resolveGroupLines(mileleItems(), 'OPL-2026-05334');
-    assert.equal(mixedStemsPerBox(rows), 500);
+    assert.equal(rows.length, 10, 'FUSCHIANA is in the set despite a null custom_opl');
 
-    // What the link-based selection used to produce, kept as the regression it is.
     const linkedOnly = mileleItems().filter((r) => r.custom_opl === 'OPL-2026-05334');
-    assert.equal(mixedStemsPerBox(linkedOnly), 450);
+    assert.equal(linkedOnly.length, 9, 'the link-based selection dropped one — the regression');
+});
+
+test('MIXED BOX READS THE PACKRATE, IT DOES NOT SUM IT', () => {
+    // From 2026-09-29 the wizard writes the GROUP packrate to every line of a
+    // mix, because a variety has no per-box share — a mix distributes freely
+    // across its boxes. Summing would multiply the box capacity by the number
+    // of varieties.
+    const rows = [
+        { custom_packrate_mixed_box: 600 },
+        { custom_packrate_mixed_box: 600 },
+        { custom_packrate_mixed_box: 600 },
+        { custom_packrate_mixed_box: 600 },
+    ];
+    assert.equal(mixedStemsPerBox(rows, 'mixed-box'), 600, 'the box holds 600, not 2400');
+});
+
+test('a mix half-written under the old contract still yields a usable cap', () => {
+    // Rows edited before the change kept their per-variety share. max() picks
+    // the largest rather than whichever row happens to be first, so the figure
+    // degrades toward the true capacity instead of an arbitrary variety's share.
+    const rows = [
+        { custom_packrate_mixed_box: 600 },
+        { custom_packrate_mixed_box: 108 },
+    ];
+    assert.equal(mixedStemsPerBox(rows, 'mixed-box'), 600);
+});
+
+test('mixed-box is the default mode — a caller that omits it does not sum', () => {
+    const rows = [{ custom_packrate_mixed_box: 600 }, { custom_packrate_mixed_box: 600 }];
+    assert.equal(mixedStemsPerBox(rows), 600);
 });
 
 test('OmniFlora: three varieties, two of them unlinked, target 252', () => {
     const { rows, mode } = resolveGroupLines(omniFloraItems(), 'OPL-OMNI');
     assert.equal(mode, 'mixed-box');
     assert.equal(rows.length, 3);
-    assert.equal(mixedStemsPerBox(rows), 252);
+    assert.equal(mixedStemsPerBox(rows, 'mixed-box'), 252, 'the box capacity, read not summed');
 });
 
 test('bouquet lines group on custom_bunch_group, not custom_mix_group', () => {
@@ -118,7 +149,9 @@ test('bouquet lines group on custom_bunch_group, not custom_mix_group', () => {
     assert.equal(mode, 'bouquet');
     assert.equal(groupField, 'custom_bunch_group');
     assert.deepEqual(rows.map((r) => r.item_code), ['A-50CM', 'B-50CM']);
-    assert.equal(mixedStemsPerBox(rows), 180);
+    // A bouquet SUMS — its recipe is fixed, so each figure is genuinely that
+    // variety's share of every identical bunch.
+    assert.equal(mixedStemsPerBox(rows, 'bouquet'), 180);
 });
 
 test('a straight box is unaffected — still matched on custom_opl', () => {
@@ -197,7 +230,7 @@ test('no line carries the OPL: the group comes from the ORDER', () => {
 test('the bought-in component is in the set, and the group sums to the box target', () => {
     const { rows } = resolveGroupLines(bouquetOrder(null), 'OPL-2026-05970');
     assert.ok(rows.some((r) => r.item_code === 'Lepidium/Limonium-50CM'));
-    assert.equal(mixedStemsPerBox(rows), 455);
+    assert.equal(mixedStemsPerBox(rows, 'bouquet'), 455, '175 + 70 + 105 + 105');
 });
 
 test('one linked line is enough — the fallback does not engage', () => {
@@ -237,4 +270,44 @@ test('a STRAIGHT order with no links is unchanged — no fallback, no guess', ()
     assert.equal(res.mode, 'straight');
     assert.equal(res.viaOrder, undefined);
     assert.deepEqual(res.rows, []);
+});
+
+// ── the live acceptance check for the 2026-09-29 contract ──────────────────
+
+test('600-per-box 4-box mix: target 600, order total 2400', () => {
+    // What the wizard now writes: group packrate on every line, and each
+    // line's own qty/stock_qty carrying its share of the order.
+    const items = [
+        { item_code: 'Madam Red-50CM',  custom_opl: 'OPL-LIVE', custom_mixed_box: 1, custom_mix_group: 9, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 600, custom_number_of_boxes: 4, qty: 1000 },
+        { item_code: 'Celeb-50CM',      custom_opl: null,       custom_mixed_box: 1, custom_mix_group: 9, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 600, custom_number_of_boxes: 4, qty: 800 },
+        { item_code: 'Brinessa-50CM',   custom_opl: null,       custom_mixed_box: 1, custom_mix_group: 9, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 600, custom_number_of_boxes: 4, qty: 500 },
+        { item_code: 'Paranita-50CM',   custom_opl: null,       custom_mixed_box: 1, custom_mix_group: 9, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 600, custom_number_of_boxes: 4, qty: 100 },
+    ];
+    const { rows, mode } = resolveGroupLines(items, 'OPL-LIVE');
+    assert.equal(mode, 'mixed-box');
+    assert.equal(rows.length, 4);
+
+    // The box target.
+    assert.equal(mixedStemsPerBox(rows, mode), 600, 'box capacity is 600, not 2400');
+
+    // The order total, as useSalesOrderTargets computes it: sum of line qty.
+    const orderTotal = rows.reduce((s, r) => s + Number(r.qty ?? 0), 0);
+    assert.equal(orderTotal, 2400);
+
+    // And the boxes, as useSalesOrderTargets takes them: max across rows.
+    const boxCount = rows.reduce((m, r) => Math.max(m, Number(r.custom_number_of_boxes ?? 0)), 0);
+    assert.equal(boxCount, 4);
+    assert.equal(boxCount * 600, orderTotal, 'capacity x boxes reconciles to the order');
+});
+
+test('varieties need not divide evenly — that is the point', () => {
+    // 1000 / 4 = 250, 800 / 4 = 200, 500 / 4 = 125, 100 / 4 = 25. None of this
+    // matters any more: the packer splits at the bench.
+    const items = [
+        { item_code: 'A-50CM', custom_opl: 'OPL-ODD', custom_mixed_box: 1, custom_mix_group: 1, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 600, custom_number_of_boxes: 4, qty: 1333 },
+        { item_code: 'B-50CM', custom_opl: null,      custom_mixed_box: 1, custom_mix_group: 1, custom_mixed_bunch: 0, custom_bunch_group: null, custom_packrate_mixed_box: 600, custom_number_of_boxes: 4, qty: 1067 },
+    ];
+    const { rows, mode } = resolveGroupLines(items, 'OPL-ODD');
+    assert.equal(mixedStemsPerBox(rows, mode), 600);
+    assert.equal(rows.reduce((s, r) => s + Number(r.qty ?? 0), 0), 2400);
 });

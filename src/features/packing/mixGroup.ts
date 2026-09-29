@@ -176,16 +176,42 @@ function resolveFromOrder<T extends GroupableLine>(items: T[]): ResolvedGroup<T>
 }
 
 /**
- * The per-box cap for a mixed pick list: the SUM of `custom_packrate_mixed_box`
- * across the group, in STEMS.
+ * The per-box cap for a mixed pick list, in STEMS. THE RULE DIFFERS BY MODE.
  *
- * `custom_packrate` is 0 on every mixed line and must stay so — it means "whole
- * box", and no single variety knows that number. Writing a per-variety figure
- * there once closed a box at 10 of 20 stems and reported it full.
+ * ── BOUQUET: SUM across the group ──────────────────────────────────────────
  *
- * Bouquets use the identical formula: the wizard writes
- * `custom_packrate_mixed_box = custom_stems_per_bunch × custom_bunches_per_box`.
+ * A bouquet's recipe is FIXED — every bunch is identical by definition — so
+ * `custom_packrate_mixed_box` is genuinely per variety, written by the wizard
+ * as `custom_stems_per_bunch × custom_bunches_per_box`. Adding them up gives
+ * the whole box. APH: 175 + 105 + 70 + 105 = 455.
+ *
+ * ── MIXED BOX: the packrate ITSELF ─────────────────────────────────────────
+ *
+ * A mix has no fixed recipe. It distributes its varieties freely across its
+ * boxes — one box may take 20 Madam Red and the next 5, whatever the packer has
+ * to hand — so a variety has no per-box share to store. From 2026-09-29 the
+ * wizard writes the GROUP PACKRATE to every line of the group instead: the same
+ * number on each, and that number IS the box capacity.
+ *
+ * Summing it would therefore multiply the capacity by the number of varieties —
+ * a 600-stem box across 4 varieties would read 2,400 and never close.
+ *
+ * `max` rather than `rows[0]`, so a group half-written under the old contract
+ * still yields a usable figure rather than whichever row happens to be first.
+ *
+ * `custom_packrate` stays 0 on every mixed line either way — it means "whole
+ * box", and writing a per-variety figure there once closed a box at 10 of 20
+ * stems and reported it full.
  */
-export function mixedStemsPerBox(rows: { custom_packrate_mixed_box?: unknown }[]): number {
-    return rows.reduce((sum, r) => sum + (Number(r.custom_packrate_mixed_box ?? 0) || 0), 0);
+export function mixedStemsPerBox(
+    rows: { custom_packrate_mixed_box?: unknown }[],
+    mode: PackMode = 'mixed-box',
+): number {
+    const value = (r: { custom_packrate_mixed_box?: unknown }) =>
+        Number(r.custom_packrate_mixed_box ?? 0) || 0;
+
+    if (mode === 'bouquet') {
+        return rows.reduce((sum, r) => sum + value(r), 0);
+    }
+    return rows.reduce((max, r) => Math.max(max, value(r)), 0);
 }

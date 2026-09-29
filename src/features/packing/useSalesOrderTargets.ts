@@ -124,20 +124,27 @@ async function fetchSalesOrderTargets({
   const conversionFactor = Number(row.conversion_factor ?? 0) || 1;
   const soIsBunchUom = /^\s*bunch\s*\(/i.test(uom);
 
-  // Mixed box: the cap is the SUM across the mix group. custom_packrate is 0
-  // on mixed lines and must stay so - it means "whole box" and no single line
-  // knows that number. Writing a per-variety figure there closed a box at
-  // 10 of 20 stems and reported it fully packed. custom_packrate_mixed_box is
-  // always STEMS, so divide into the line's uom before resolveTargetUnits,
-  // whose contract is that packRate and qty arrive in the SO line's uom.
+  // THE BOX CAP IS READ DIFFERENTLY FOR THE TWO ASSORTMENTS, and
+  // mixedStemsPerBox owns that difference: a BOUQUET sums its fixed recipe
+  // across the group, a MIXED BOX reads the group packrate, which every line
+  // now carries identically. Summing a mixed box would multiply its capacity by
+  // the number of varieties.
+  //
+  // custom_packrate is 0 on mixed lines and must stay so - it means "whole box"
+  // and no single line knows that number. Writing a per-variety figure there
+  // closed a box at 10 of 20 stems and reported it fully packed.
+  //
+  // custom_packrate_mixed_box is always STEMS, so divide into the line's uom
+  // before resolveTargetUnits, whose contract is that packRate and qty arrive
+  // in the SO line's uom.
   let packRate: number;
   let qty: number;
 
   if (isMixed) {
-    // Summed across the GROUP, not across the linked lines — that difference is
-    // the whole fix. Milele reads 500 (10 x 50) where the link-based set read
-    // 450, because FUSCHIANA's 50 was being dropped with its row.
-    const stemsPerBox = mixedStemsPerBox(rows);
+    // Resolved across the GROUP, not across the linked lines — that difference
+    // still matters for a bouquet: Milele reads 500 (10 x 50) where the
+    // link-based set read 450, because FUSCHIANA's 50 was dropped with its row.
+    const stemsPerBox = mixedStemsPerBox(rows, resolved.mode);
     packRate = soIsBunchUom ? stemsPerBox / conversionFactor : stemsPerBox;
     qty = rows.reduce((sum, r) => sum + Number(r.qty ?? 0), 0);
   } else {
