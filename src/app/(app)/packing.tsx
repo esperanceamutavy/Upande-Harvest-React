@@ -170,6 +170,9 @@ const REJECTION_TONE: Record<PackRejection, NoticeTone> = {
   'variety-mismatch': 'danger',
   'length-mismatch': 'danger',
   'order-complete': 'danger',
+  // A warning, not a failure: the order is fine and the packer simply needs a
+  // smaller bunch for the gap in front of them.
+  'box-too-small-for-bunch': 'warn',
   'bad-uom': 'danger',
   error: 'danger',
 };
@@ -295,7 +298,10 @@ export default function PackingScreen() {
       // RESUME, do not restart. Reopening a partially packed OPL used to show
       // "Box 1 of N — 0 packed", so the packer refilled full boxes and every
       // scan came back as already packed.
-      const existing = await existingMut.mutateAsync(opl.name);
+      const existing = await existingMut.mutateAsync({
+        oplName: opl.name,
+        mode: targets.packMode,
+      });
       const resume = resumePlan(
         existing.perBox,
         targets.capPerBox,
@@ -457,11 +463,31 @@ export default function PackingScreen() {
    * The increment is one BUNCH when the session counts bunches, and the scanned
    * bunch's own stem count when it counts stems. The scanned bunch always knows
    * its own size even when the order does not.
+   *
+   * ── A BOX BELOW ITS CAP KEEPS RECEIVING ──────────────────────────────────
+   *
+   * Advancing is only ever allowed when the current box is FULL. It used to
+   * advance whenever the next bunch would overflow, which is not the same
+   * thing: a box at 18 of 35 that is handed a bunch it cannot fit was moved off
+   * and left short, and the next box filled instead. OPL-2026-06849 came out
+   * 35 / 18 / 35 — a hole in the MIDDLE of the sequence, which is worse than a
+   * short last box because nothing downstream goes looking for it.
+   *
+   * So a bunch that does not fit a box that is still below cap is REFUSED
+   * rather than redirected. The packer keeps filling the box in front of them
+   * with something that does fit. In the session's own unit a bunch is 1, so
+   * this only bites when counting stems and the remaining gap is smaller than
+   * the scanned bunch — exactly the case where silently skipping the box was
+   * wrong.
    */
   function planBox(s: PackingSession, increment: number): { boxId: number; after: number } | null {
+    const cap = s.targets.capPerBox;
     let nextBox = boxNumber;
     let count = inBox;
-    if (count + increment > s.targets.capPerBox) {
+
+    if (count + increment > cap) {
+      // Only leave a box that is genuinely finished.
+      if (count < cap) return null;
       nextBox += 1;
       count = 0;
     }
@@ -519,11 +545,23 @@ export default function PackingScreen() {
       const increment = s.targets.unitLabel === 'bunches' ? 1 : bunch.stemsPerBunch;
       const plan = planBox(s, increment);
       if (!plan) {
-        reject(
-          bunchId,
-          'order-complete',
-          `All ${s.targets.boxCount} boxes are full — ${s.opl.name} is fully packed. Nothing further can be added.`,
-        );
+        // TWO REASONS planBox refuses, and they need different words. Telling a
+        // packer the order is full when the box in front of them has room is
+        // how they end up moving on and leaving it short.
+        if (inBox < s.targets.capPerBox) {
+          const gap = s.targets.capPerBox - inBox;
+          reject(
+            bunchId,
+            'box-too-small-for-bunch',
+            `Box ${boxNumber} has room for ${gap} more ${s.targets.unitLabel}, and this bunch is ${increment}. Pick one that fits — the box stays open.`,
+          );
+        } else {
+          reject(
+            bunchId,
+            'order-complete',
+            `All ${s.targets.boxCount} boxes are full — ${s.opl.name} is fully packed. Nothing further can be added.`,
+          );
+        }
         return;
       }
 
@@ -592,7 +630,10 @@ export default function PackingScreen() {
       let boxHeld = false;
       if (boxClosed) {
         try {
-          const truth = await existingMut.mutateAsync(s.opl.name);
+          const truth = await existingMut.mutateAsync({
+            oplName: s.opl.name,
+            mode: s.targets.packMode,
+          });
           const stored = truth.perBox.get(plan.boxId);
           if (stored) {
             const storedCount = unit === 'bunches' ? stored.bunches : stored.stems;

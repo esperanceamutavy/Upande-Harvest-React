@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { apiClient } from '../../lib/api';
 import { groupRowsByBox } from './boxProgress';
 import type { BoxProgress } from './resume';
+import type { PackMode } from './mixGroup';
 
 // What has already been packed against an OPL, so a session RESUMES rather than
 // restarting. Two calls: find the Farm Pack List for the OPL, then read its rows.
@@ -35,7 +36,14 @@ async function findFarmPackList(oplName: string): Promise<string | null> {
     return rows.length > 0 && rows[0].name != null ? String(rows[0].name) : null;
 }
 
-async function fetchExistingPack(oplName: string): Promise<ExistingPack> {
+/** The pick list, and how to count what is in its boxes — a bouquet's rows are
+ *  one PER COMPONENT and must not be summed. See groupRowsByBox. */
+export interface ExistingPackArgs {
+    oplName: string;
+    mode: PackMode;
+}
+
+async function fetchExistingPack({ oplName, mode }: ExistingPackArgs): Promise<ExistingPack> {
     const fplName = await findFarmPackList(oplName);
     if (!fplName) return { fplName: null, perBox: new Map() };
 
@@ -46,7 +54,7 @@ async function fetchExistingPack(oplName: string): Promise<ExistingPack> {
         ? (res.data!.data!.pack_list_item as Record<string, unknown>[])
         : [];
 
-    return { fplName, perBox: groupRowsByBox(rows) };
+    return { fplName, perBox: groupRowsByBox(rows, mode) };
 }
 export function useExistingPack() {
     return useMutation({ mutationFn: fetchExistingPack });

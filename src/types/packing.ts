@@ -340,6 +340,10 @@ export type PackRejection =
   | 'variety-mismatch'
   | 'length-mismatch'
   | 'order-complete'
+  /** The open box is below its cap but this bunch will not fit the gap. The
+   *  packer stays on the box and picks something smaller — moving them on would
+   *  leave a hole in the middle of the sequence. */
+  | 'box-too-small-for-bunch'
   | 'bad-uom'
   | 'error';
 
