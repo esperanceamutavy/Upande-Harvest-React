@@ -182,6 +182,17 @@ export interface SalesOrderTargets {
   consignee: string | null;
 
   /**
+   * The size the order is PACKED IN, from the Sales Order's `custom_bunching`
+   * ("X9" -> 9). Null when the order does not specify one.
+   *
+   * Deliberately NOT `stemsPerBunch`, which resolves through the OPL row's uom
+   * and the line's uom before reaching this field — useful for counting, but it
+   * describes what was allocated rather than what was ORDERED. Only the order's
+   * own declaration can say a Bunch(7) is wrong.
+   */
+  orderBunching: number | null;
+
+  /**
    * Stems per bunch, resolved in order: the OPL row's `Bunch(N)` uom, then the
    * Sales Order's `custom_bunching` (`"X10"` → 10). **Null when neither is
    * available** — in which case the session counts in STEMS and nothing may be
@@ -339,6 +350,10 @@ export type PackRejection =
   | 'ungraded'
   | 'variety-mismatch'
   | 'length-mismatch'
+  /** The order is packed in a stated bunch size and this bunch is not it. A
+   *  Bunch(7) against an X9 order ships the customer bunches they did not
+   *  order, and closes the box short. */
+  | 'bunch-size-mismatch'
   | 'order-complete'
   /** The open box is below its cap but this bunch will not fit the gap. The
    *  packer stays on the box and picks something smaller — moving them on would

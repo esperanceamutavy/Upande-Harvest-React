@@ -21,7 +21,7 @@ import { filterOpls } from '../../features/packing/oplSearch';
 import { matchesSegment, startedFirst } from '../../features/packing/packState';
 import type { PickerSegment } from '../../features/packing/packState';
 import { lengthFloorFor, substitutesForLine } from '../../features/packing/substitutes';
-import { parseStemsPerBunch } from '../../features/packing/targets';
+import { parseStemsPerBunch, bunchSizeMatchesOrder } from '../../features/packing/targets';
 import { useBunchDetails } from '../../features/packing/useBunchDetails';
 import {
   classifyPackError,
@@ -169,6 +169,7 @@ const REJECTION_TONE: Record<PackRejection, NoticeTone> = {
   ungraded: 'danger',
   'variety-mismatch': 'danger',
   'length-mismatch': 'danger',
+  'bunch-size-mismatch': 'danger',
   'order-complete': 'danger',
   // A warning, not a failure: the order is fine and the packer simply needs a
   // smaller bunch for the gap in front of them.
@@ -446,6 +447,20 @@ export default function PackingScreen() {
     // A variety ON the order keeps the order's own length, unchanged. One
     // reachable only by substitution is measured against the line it stands in
     // for: a substitute listed against Adalonia-40CM admits 40CM or longer.
+    // THE ORDER'S BUNCH SIZE IS BINDING. SAL-ORD-2026-02617 is an X9 order: box
+    // 1 took 50 x Bunch(7) and closed 100 stems light, box 2 mixed sevens and
+    // nines, and only box 3 was right. Refused here alongside variety and
+    // length, for the same reason — it is wrong before it is in the box.
+    //
+    // A BOUQUET IS EXEMPT. Its size is its recipe's — 5 + 3 + 2 + 3 is a
+    // Bunch(13) whatever the order's bunching says — so the rule does not
+    // apply. Keyed on the BUNCH's own flag rather than the pack mode, because
+    // it is the physical bunch that either has a recipe or does not.
+    if (!bunch.isMixedBunch
+        && !bunchSizeMatchesOrder(bunch.stemsPerBunch, s.targets.orderBunching)) {
+      return 'bunch-size-mismatch';
+    }
+
     const verdict = compareLength(effectiveStemLength(bunch, compareLength), floorFor(s, bunch));
     if (verdict === 'shorter') return 'length-mismatch';
     if (verdict === 'unknown') {
@@ -528,6 +543,15 @@ export default function PackingScreen() {
         );
         return;
       }
+      if (mismatch === 'bunch-size-mismatch') {
+        reject(
+          bunchId,
+          mismatch,
+          `This is a Bunch(${bunch.stemsPerBunch}) and the order is packed in ${s.targets.orderBunching}s. Pick a Bunch(${s.targets.orderBunching}).`,
+        );
+        return;
+      }
+
       if (mismatch === 'length-mismatch') {
         reject(
           bunchId,

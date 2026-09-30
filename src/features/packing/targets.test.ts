@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { resolveTargetUnits } from './targets.ts';
+import { resolveTargetUnits, bunchSizeMatchesOrder, parseBunching } from './targets.ts';
 
 test('SAL-ORD-2026-01494 — Stems uom, bunch size from the OPL row', () => {
   assert.deepEqual(
@@ -174,4 +174,66 @@ test('a bunch is not always 10 — X7 and X9 orders resolve on their own size', 
   });
   assert.equal(x9.capPerBox, 32);
   assert.equal(x9.stemsPerBunch, 9);
+});
+
+// ── the order's bunch size is binding ──────────────────────────────────────
+//
+// SAL-ORD-2026-02617 / OPL-2026-06795 is an X9 order at 450 stems a box. Box 1
+// took 50 x Bunch(7) and closed 100 stems light; box 2 mixed sevens and nines;
+// only box 3 was all nines. The customer gets bunches they did not order and
+// the box is short, and nothing caught either.
+
+test('BUNCH(9) AGAINST AN X9 ORDER IS ACCEPTED', () => {
+    assert.ok(bunchSizeMatchesOrder(9, parseBunching('X9')));
+});
+
+test('BUNCH(7) AGAINST AN X9 ORDER IS REJECTED', () => {
+    assert.ok(!bunchSizeMatchesOrder(7, parseBunching('X9')));
+});
+
+test('the live box 1: fifty Bunch(7) on an X9 order, every one refused', () => {
+    const order = parseBunching('X9');
+    for (let i = 0; i < 50; i += 1) {
+        assert.ok(!bunchSizeMatchesOrder(7, order), `scan ${i + 1} must be refused`);
+    }
+});
+
+test('ANY BUNCH SIZE IS ACCEPTED WHEN THE ORDER HAS NO BUNCHING', () => {
+    for (const raw of ['', '   ', 'rubbish']) {
+        const order = parseBunching(raw);
+        assert.equal(order, null, `"${raw}" states no bunching`);
+        for (const size of [5, 7, 9, 10, 13]) {
+            assert.ok(bunchSizeMatchesOrder(size, order));
+        }
+    }
+});
+
+test('an unparseable bunch size is not refused by THIS rule', () => {
+    // A format surprise must not stop a grader's work reaching a packer, and
+    // there is already a separate rejection for an unusable uom.
+    assert.ok(bunchSizeMatchesOrder(null, 9));
+    assert.ok(bunchSizeMatchesOrder(0, 9));
+});
+
+test('a nonsense order bunching constrains nothing', () => {
+    assert.ok(bunchSizeMatchesOrder(7, 0));
+    assert.ok(bunchSizeMatchesOrder(7, null));
+});
+
+test('the bunching prefix does not change the verdict', () => {
+    for (const raw of ['X9', 'x9', '9']) {
+        assert.ok(bunchSizeMatchesOrder(9, parseBunching(raw)), raw);
+        assert.ok(!bunchSizeMatchesOrder(7, parseBunching(raw)), raw);
+    }
+});
+
+test("A BOUQUET'S SIZE COMES FROM ITS RECIPE, so the rule must not be applied", () => {
+    // 5 + 3 + 2 + 3 is a Bunch(13) whatever the order says. The caller skips
+    // the check on a mixed bunch; this pins WHY, by showing that applying it
+    // would refuse a perfectly good bouquet.
+    const recipe = [5, 3, 2, 3];
+    const bouquetSize = recipe.reduce((a, b) => a + b, 0);
+    assert.equal(bouquetSize, 13);
+    assert.ok(!bunchSizeMatchesOrder(bouquetSize, parseBunching('X9')),
+        'which is exactly why the caller exempts it');
 });

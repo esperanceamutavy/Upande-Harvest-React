@@ -36,6 +36,44 @@ export function parseBunching(raw: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/**
+ * Does this bunch match the size the ORDER is packed in?
+ *
+ * ── WHY ────────────────────────────────────────────────────────────────────
+ *
+ * SAL-ORD-2026-02617 is an X9 order at 450 stems a box. Box 1 took 50 x
+ * Bunch(7) and closed 100 stems light; box 2 took a mix of sevens and nines.
+ * Only box 3 was all nines. The customer is shipped bunches they did not order
+ * and the box is short, and nothing caught either.
+ *
+ * So a bunch size that disagrees with the order's `custom_bunching` is refused,
+ * exactly as a wrong variety or a short length is refused. This is STRICTER
+ * than the box cap and it makes the cap arithmetic safe as a side effect: when
+ * every bunch in a box is the same size, counting bunches and counting stems
+ * give the same answer.
+ *
+ * ── WHEN IT DOES NOT APPLY ─────────────────────────────────────────────────
+ *
+ * `orderBunching` null — the order does not specify one, so bunch size is
+ * unconstrained and behaviour is unchanged.
+ *
+ * `scanned` null — the bunch's own uom did not parse. Unchanged too: a format
+ * surprise must not stop a grader's work reaching a packer, and there is
+ * already a separate rejection for an unusable uom.
+ *
+ * A BOUQUET IS EXEMPT and the caller enforces that, not this function. A
+ * bouquet's size comes from its recipe — 5 + 3 + 2 + 3 is a Bunch(13) whatever
+ * the order's bunching says — so the question does not apply to it at all.
+ */
+export function bunchSizeMatchesOrder(
+  scanned: number | null | undefined,
+  orderBunching: number | null | undefined,
+): boolean {
+  if (orderBunching == null || orderBunching <= 0) return true;
+  if (scanned == null || scanned <= 0) return true;
+  return scanned === orderBunching;
+}
+
 export interface TargetUnitInput {
   /** The SO line's uom. */
   uom: string;

@@ -7,7 +7,7 @@ import { mixedStemsPerBox, resolveGroupLines } from './mixGroup';
 import { scopeToOrder } from './substitutes.ts';
 import type { ResolvedSubstituteRow } from './substitutes.ts';
 import { resolveVariantParent } from './useBunchDetails';
-import { resolveTargetUnits } from './targets';
+import { resolveTargetUnits, parseBunching } from './targets';
 import type { SalesOrderTargets } from '../../types/packing';
 
 // GET /api/resource/Sales Order/<name> — the SOURCE OF TRUTH for what a box
@@ -242,6 +242,9 @@ async function fetchSalesOrderTargets({
     stockQty: Number(row.stock_qty ?? 0),
     // The SO line has no length field; the item_code suffix is the source.
     orderLength: orderLengthFromItemCode(_text(row.item_code)),
+    // The ORDER's own declaration, not the resolved bunch size — a Bunch(7)
+    // can only be called wrong against what the order asked for.
+    orderBunching: parseBunching(doc.custom_bunching != null ? String(doc.custom_bunching) : ''),
     // LINE first, HEADER as fallback, then RESOLVED through Customer Code —
     // the stored value is a record NAME, not the code. See customerCodeRef.ts.
     customerCode: codeRef,
