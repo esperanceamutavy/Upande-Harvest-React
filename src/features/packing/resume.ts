@@ -34,7 +34,18 @@ export interface ResumeState {
  *   - if every existing box is full, the next box number after the highest
  *   - the counter is seeded with that box's existing count, so a box holding
  *     28 of 34 opens at 28 rather than being skipped
- *   - if that lands past the order's box count, the order is complete
+ *   - if that would land past the order's box count, the order is COMPLETE and
+ *     the counter HOLDS at the final box
+ *
+ * THE COUNTER NEVER NAMES A BOX THAT DOES NOT EXIST. Closing the last box used
+ * to advance to boxCount + 1, so a finished 3-box order read "Box 4 of 3" while
+ * the footer correctly said every box was packed. The packer was shown a box
+ * they could not fill and did not have.
+ *
+ * `isComplete` carries that state instead, which is what the screen already
+ * keys its completion notice on — so the message survives and only the phantom
+ * box goes. The two are computed from the same condition by construction,
+ * rather than one being derived from the other's side effect.
  */
 export function resumePlan(
     perBox: Map<number, BoxProgress>,
@@ -53,23 +64,29 @@ export function resumePlan(
 
     let boxNumber: number;
     let inBox: number;
+    let isComplete = false;
+
     if (partial !== undefined) {
         boxNumber = partial;
         inBox = countOf(perBox.get(partial)!);
     } else {
-        boxNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
-        inBox = 0;
+        // Every existing box is full, so the work moves to the next one.
+        const nextBox = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+        isComplete = nextBox > boxCount;
+        if (isComplete) {
+            // HOLD at the last box rather than naming one past the end. It is
+            // full, so the card reads "Box 3 of 3 — 455 of 455" beside the
+            // completion notice, which is the truth: the order is done and that
+            // is the box it finished on.
+            boxNumber = boxCount;
+            inBox = countOf(perBox.get(boxCount) ?? { bunches: 0, stems: 0 });
+        } else {
+            boxNumber = nextBox;
+            inBox = 0;
+        }
     }
 
-    return {
-        boxNumber,
-        inBox,
-        packedTotal,
-        completeBoxes,
-        // Only reachable when every existing box was full and the next number
-        // runs past the end of the order.
-        isComplete: boxNumber > boxCount,
-    };
+    return { boxNumber, inBox, packedTotal, completeBoxes, isComplete };
 }
 
 /** `[1,2,3]` → `"1-3"`; `[1,2,4]` → `"1-2, 4"`. Empty → null. */

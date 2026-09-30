@@ -72,7 +72,12 @@ test('every box full — order is complete and scans must be refused', () => {
     ]);
     const r = resumePlan(perBox, 4, 2, 'bunches');
 
-    assert.equal(r.boxNumber, 3);
+    // WAS 3, which is the bug this now pins against: a 2-box order reported
+    // "Box 3 of 2". The counter holds at the last box and isComplete carries
+    // the state, so scans are still refused — planBox reads isComplete, not the
+    // box number.
+    assert.equal(r.boxNumber, 2);
+    assert.equal(r.inBox, 4, 'and it reports that box as full');
     assert.equal(r.isComplete, true);
     assert.deepEqual(r.completeBoxes, [1, 2]);
 });
@@ -251,4 +256,115 @@ test('erring high releases, never strands', () => {
     // The reverse would have held a box only a 10 could fill — still fine,
     // because planBox advances anyway when the next bunch does not fit.
     assert.ok(boxAcceptsMore(444, 455, 10));
+});
+
+// ── the counter must never name a box that does not exist ──────────────────
+//
+// Closing the last box advanced to boxCount + 1, so a finished 3-box order read
+// "Box 4 of 3" in the header while the footer correctly said all boxes were
+// packed. The packer was shown a box they could not fill and did not have.
+
+/** A box-number -> progress map where every listed box is full. */
+function fullBoxes(n: number, cap: number): Map<number, BoxProgress> {
+    const m = new Map<number, BoxProgress>();
+    for (let i = 1; i <= n; i += 1) m.set(i, { bunches: cap, stems: cap });
+    return m;
+}
+
+test('A 3-BOX ORDER FULLY PACKED SHOWS BOX 3 OF 3, with the completion notice', () => {
+    const plan = resumePlan(fullBoxes(3, 100), 100, 3, 'stems');
+    assert.equal(plan.boxNumber, 3, 'holds at the last box, never 4');
+    assert.ok(plan.isComplete, 'and the completion state still fires');
+    assert.deepEqual(plan.completeBoxes, [1, 2, 3]);
+});
+
+test('the held box reports its own contents, not zero', () => {
+    const plan = resumePlan(fullBoxes(3, 100), 100, 3, 'stems');
+    assert.equal(plan.inBox, 100, 'Box 3 of 3 — 100 of 100 reads true');
+});
+
+test('CLOSING BOX 2 OF 3 STILL ADVANCES TO BOX 3', () => {
+    const plan = resumePlan(fullBoxes(2, 100), 100, 3, 'stems');
+    assert.equal(plan.boxNumber, 3);
+    assert.equal(plan.inBox, 0, 'a fresh box starts empty');
+    assert.ok(!plan.isComplete, 'two of three boxes is not a finished order');
+});
+
+test('a one-box order finishes on box 1', () => {
+    const plan = resumePlan(fullBoxes(1, 100), 100, 1, 'stems');
+    assert.equal(plan.boxNumber, 1);
+    assert.ok(plan.isComplete);
+});
+
+test('a part-filled last box is not complete and does not hold', () => {
+    const m = fullBoxes(2, 100);
+    m.set(3, { bunches: 40, stems: 40 });
+    const plan = resumePlan(m, 100, 3, 'stems');
+    assert.equal(plan.boxNumber, 3);
+    assert.equal(plan.inBox, 40, 'resumes mid-box');
+    assert.ok(!plan.isComplete);
+});
+
+test('an empty pack list opens at box 1 of N, not complete', () => {
+    const plan = resumePlan(new Map(), 100, 3, 'stems');
+    assert.equal(plan.boxNumber, 1);
+    assert.equal(plan.inBox, 0);
+    assert.ok(!plan.isComplete);
+});
+
+test('more boxes packed than ordered still holds at the ordered count', () => {
+    // Defensive: planBox refuses to exceed boxCount, but a hand-built pack list
+    // could. The counter must not name box 5 of 3 either.
+    const plan = resumePlan(fullBoxes(4, 100), 100, 3, 'stems');
+    assert.equal(plan.boxNumber, 3);
+    assert.ok(plan.isComplete);
+});
+
+test('counting in bunches holds the same way', () => {
+    const plan = resumePlan(fullBoxes(3, 35), 35, 3, 'bunches');
+    assert.equal(plan.boxNumber, 3);
+    assert.equal(plan.inBox, 35);
+    assert.ok(plan.isComplete);
+});
+
+test('A SCAN IS STILL REFUSED on a complete order — inBox is load-bearing', () => {
+    // planBox is pure and lives in packing.tsx, so its rule is replayed here
+    // against the resumed state. It is the reason inBox must report the held
+    // box's REAL count rather than 0:
+    //
+    //   hold at box 3 with inBox = cap  ->  cap + 1 > cap, so it advances to
+    //                                       box 4, which is past boxCount, and
+    //                                       the scan is refused.
+    //   hold at box 3 with inBox = 0    ->  0 + 1 fits, so the scan lands in an
+    //                                       already-full box 3. Silent over-pack.
+    //
+    // A future edit that zeroes inBox here would break refusal with every test
+    // above still green, which is exactly why this one exists.
+    const cap = 100;
+    const boxCount = 3;
+    const plan = resumePlan(fullBoxes(3, cap), cap, boxCount, 'stems');
+
+    const planBox = (boxNumber: number, inBox: number, increment: number) => {
+        let nextBox = boxNumber;
+        let count = inBox;
+        if (count + increment > cap) {
+            nextBox += 1;
+            count = 0;
+        }
+        return nextBox > boxCount ? null : { boxId: nextBox, after: count + increment };
+    };
+
+    assert.equal(planBox(plan.boxNumber, plan.inBox, 10), null, 'the order is full — refuse');
+});
+
+test('and a scan on the last box is still ACCEPTED while it has room', () => {
+    const cap = 100;
+    const boxCount = 3;
+    const m = fullBoxes(2, cap);
+    m.set(3, { bunches: 90, stems: 90 });
+    const plan = resumePlan(m, cap, boxCount, 'stems');
+
+    assert.equal(plan.boxNumber, 3);
+    assert.equal(plan.inBox, 90);
+    assert.ok(!plan.isComplete, '90 of 100 is not a finished order');
 });
