@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { resolveTargetUnits, bunchSizeMatchesOrder, parseBunching } from './targets.ts';
+import { resolveTargetUnits, bunchSizeMatchesOrder, parseBunching, orderBunchSize } from './targets.ts';
 
 test('SAL-ORD-2026-01494 — Stems uom, bunch size from the OPL row', () => {
   assert.deepEqual(
@@ -236,4 +236,66 @@ test("A BOUQUET'S SIZE COMES FROM ITS RECIPE, so the rule must not be applied", 
     assert.equal(bouquetSize, 13);
     assert.ok(!bunchSizeMatchesOrder(bouquetSize, parseBunching('X9')),
         'which is exactly why the caller exempts it');
+});
+
+// ── the ORDER's bunch size: line first, header second ──────────────────────
+//
+// The rule read the header alone and so contradicted the unit arbiter three
+// lines above it. SAL-ORD-2026-02668's Brigitte Bardot line is uom Bunch(7)
+// under an X5 header, and a correct Bunch(7) scan was refused. Orders are now
+// written with per-row bunching and no header value at all.
+
+test('THE LINE WINS: Bunch(7) line under an X5 header accepts 7, refuses 5', () => {
+    const size = orderBunchSize('Bunch(7)', 'X5');
+    assert.equal(size, 7, 'the line overrides the order-wide default');
+    assert.ok(bunchSizeMatchesOrder(7, size));
+    assert.ok(!bunchSizeMatchesOrder(5, size), 'the header value is not the rule');
+});
+
+test('TWO LINES ON ONE ORDER EACH ENFORCE THEIR OWN', () => {
+    // Per-row bunching with no header value at all.
+    const lineA = orderBunchSize('Bunch(5)', '');
+    const lineB = orderBunchSize('Bunch(10)', '');
+    assert.equal(lineA, 5);
+    assert.equal(lineB, 10);
+
+    assert.ok(bunchSizeMatchesOrder(5, lineA));
+    assert.ok(!bunchSizeMatchesOrder(10, lineA), 'B-sized bunch refused on line A');
+    assert.ok(bunchSizeMatchesOrder(10, lineB));
+    assert.ok(!bunchSizeMatchesOrder(5, lineB), 'A-sized bunch refused on line B');
+});
+
+test('the header is still used when the line does not state one', () => {
+    assert.equal(orderBunchSize('Stems', 'X9'), 9);
+    assert.equal(orderBunchSize('', 'X9'), 9);
+});
+
+test('NO LINE UOM AND NO HEADER ACCEPTS ANYTHING', () => {
+    const size = orderBunchSize('Stems', '');
+    assert.equal(size, null);
+    for (const n of [5, 7, 9, 10, 13]) {
+        assert.ok(bunchSizeMatchesOrder(n, size));
+    }
+});
+
+test('a nonsense header does not constrain either', () => {
+    assert.equal(orderBunchSize('Stems', 'rubbish'), null);
+    assert.ok(bunchSizeMatchesOrder(7, orderBunchSize('Stems', 'rubbish')));
+});
+
+test('bouquets are unaffected — the caller exempts them, and this is why', () => {
+    // A 5+3+2+3 recipe is a Bunch(13); no order bunching would ever match it.
+    assert.ok(!bunchSizeMatchesOrder(13, orderBunchSize('Bunch(9)', 'X9')));
+});
+
+test('the arbiter and the rule agree about what the order says', () => {
+    // resolveTargetUnits consults the OPL row first for COUNTING, but the
+    // order half of its chain is this same function — so where the OPL row
+    // says nothing, the two must land on the same number.
+    const units = resolveTargetUnits({
+        uom: 'Bunch(7)', packRate: 10, qty: 70, conversionFactor: 7,
+        oplUom: 'Stems', bunching: 'X5',
+    });
+    assert.equal(units.stemsPerBunch, 7);
+    assert.equal(orderBunchSize('Bunch(7)', 'X5'), 7);
 });

@@ -37,6 +37,27 @@ export function parseBunching(raw: string): number | null {
 }
 
 /**
+ * The bunch size THE ORDER states: the SO LINE's uom first, the header's
+ * `custom_bunching` second, null when neither says.
+ *
+ * THE LINE WINS. A header bunching is an order-wide default and lines override
+ * it — SAL-ORD-2026-02668's Brigitte Bardot line is Bunch(7) under an X5
+ * header, and orders are now written with per-row bunching and no header value
+ * at all: Bunch(5) on one line, Bunch(10) on another.
+ *
+ * `oplUom` is DELIBERATELY NOT CONSULTED here, which is the one place this
+ * differs from resolveTargetUnits below. The OPL row describes what was
+ * ALLOCATED; only the order can say what was ordered, and this is the figure a
+ * scan is judged against.
+ *
+ * resolveTargetUnits calls this too, so there is a single implementation of
+ * "line, then header" and the rule cannot drift from the arbiter again.
+ */
+export function orderBunchSize(uom: string, bunching: string): number | null {
+  return parseStemsPerBunch(uom) ?? parseBunching(bunching) ?? null;
+}
+
+/**
  * Does this bunch match the size the ORDER is packed in?
  *
  * ── WHY ────────────────────────────────────────────────────────────────────
@@ -120,8 +141,11 @@ export function resolveTargetUnits(input: TargetUnitInput): TargetUnits {
 
   // Bunch SIZE only. The SO line's own uom is consulted too, since a Bunch(N)
   // line states its size there even when the OPL row says Stems.
-  const stemsPerBunch =
-    parseStemsPerBunch(oplUom) ?? parseStemsPerBunch(uom) ?? parseBunching(bunching) ?? null;
+  // The OPL row first for COUNTING — it is what was allocated and what the
+  // packer will physically scan — then the order's own statement. The second
+  // half is orderBunchSize, shared with the bunch-size rule so the two cannot
+  // disagree about what the order says.
+  const stemsPerBunch = parseStemsPerBunch(oplUom) ?? orderBunchSize(uom, bunching);
   const uomIsBunch = /^\s*bunch\s*\(/i.test(uom);
 
   // Rows disagreeing on bunch size is decisive on its own: nothing downstream

@@ -7,7 +7,7 @@ import { mixedStemsPerBox, resolveGroupLines } from './mixGroup';
 import { scopeToOrder } from './substitutes.ts';
 import type { ResolvedSubstituteRow } from './substitutes.ts';
 import { resolveVariantParent } from './useBunchDetails';
-import { resolveTargetUnits, parseBunching } from './targets';
+import { resolveTargetUnits, orderBunchSize } from './targets';
 import type { SalesOrderTargets } from '../../types/packing';
 
 // GET /api/resource/Sales Order/<name> — the SOURCE OF TRUTH for what a box
@@ -242,9 +242,17 @@ async function fetchSalesOrderTargets({
     stockQty: Number(row.stock_qty ?? 0),
     // The SO line has no length field; the item_code suffix is the source.
     orderLength: orderLengthFromItemCode(_text(row.item_code)),
-    // The ORDER's own declaration, not the resolved bunch size — a Bunch(7)
-    // can only be called wrong against what the order asked for.
-    orderBunching: parseBunching(doc.custom_bunching != null ? String(doc.custom_bunching) : ''),
+    // THE LINE'S uom FIRST, THEN THE HEADER — the same resolution the unit
+    // arbiter uses, shared as orderBunchSize rather than reimplemented.
+    //
+    // This read the header alone and so contradicted the arbiter three lines
+    // up: SAL-ORD-2026-02668's Brigitte Bardot line is Bunch(7) under an X5
+    // header, and a correct Bunch(7) scan was refused. Orders are now written
+    // with per-row bunching and no header value at all.
+    orderBunching: orderBunchSize(
+      uom,
+      doc.custom_bunching != null ? String(doc.custom_bunching) : '',
+    ),
     // LINE first, HEADER as fallback, then RESOLVED through Customer Code —
     // the stored value is a record NAME, not the code. See customerCodeRef.ts.
     customerCode: codeRef,
